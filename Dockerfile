@@ -1,4 +1,4 @@
-FROM registry.suse.com/bci/python:latest
+FROM registry.suse.com/bci/python:3.6
 
 LABEL maintainer Pablo Suárez Hernández <psuarezhernandez@suse.com>
 
