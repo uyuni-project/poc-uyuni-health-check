@@ -1,0 +1,21 @@
+[tool.isort]
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+line_length = 88
+ensure_newline_before_comments=true
+skip="templates"
+
+[tool.flake8]
+ignore = "E203, E266, E501, W503, F403, F401, W605"
+exclude = "templates"
+max-line-length = 88
+max-complexity = 18
+
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"

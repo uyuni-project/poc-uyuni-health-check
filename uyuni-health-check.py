@@ -1,14 +1,16 @@
+from pprint import pprint
+
 import salt.config
 import salt.runner
 
-from pprint import pprint 
-
-master_opts = salt.config.client_config('/etc/salt/master')
+master_opts = salt.config.client_config("/etc/salt/master")
 master_opts["quiet"] = True
 runner = salt.runner.RunnerClient(master_opts)
 
+
 def find_salt_jobs() -> dict:
     return runner.cmd("jobs.list_jobs")
+
 
 def summary_salt_jobs(jobs: dict) -> dict:
     jobs = find_salt_jobs()
@@ -17,10 +19,11 @@ def summary_salt_jobs(jobs: dict) -> dict:
         "total": 0,
     }
     for jid in jobs:
-        summary['functions'].setdefault(jobs[jid]['Function'], 0)
-        summary['functions'][jobs[jid]['Function']] += 1
-        summary['total'] += 1
+        summary["functions"].setdefault(jobs[jid]["Function"], 0)
+        summary["functions"][jobs[jid]["Function"]] += 1
+        summary["total"] += 1
     return summary
+
 
 def execute_db_query(query: str) -> list:
     kwargs = {
@@ -32,12 +35,15 @@ def execute_db_query(query: str) -> list:
     }
     return runner.cmd("salt.cmd", ["postgres.psql_query", query], kwarg=kwargs)
 
+
 def summary_db():
     channels = execute_db_query("select count(*) from rhnchannel")
     packages = execute_db_query("select count(*) from rhnpackage")
     systems = execute_db_query("select count(*) from rhnserver")
     actions = execute_db_query("select count(*) from rhnserveraction")
-    actions_last_day = execute_db_query("select * from rhnserveraction WHERE created >= NOW() - '1 day'::INTERVAL")
+    actions_last_day = execute_db_query(
+        "select * from rhnserveraction WHERE created >= NOW() - '1 day'::INTERVAL"
+    )
     failed_actions_last_day = [x for x in actions_last_day if x["status"] == "3"]
     completed_actions_last_day = [x for x in actions_last_day if x["status"] == "2"]
 
@@ -48,6 +54,7 @@ def summary_db():
     print("* Total of actions in last 24 hours: {}".format(len(actions_last_day)))
     print("   - Failed: {}".format(len(failed_actions_last_day)))
     print("   - Completed: {}".format(len(completed_actions_last_day)))
+
 
 summary_db()
 jobs = find_salt_jobs()
