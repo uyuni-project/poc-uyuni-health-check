@@ -45,3 +45,10 @@ Open the Grafana, `Data sources` configuration page and add a `Loki` data source
 
 As an example upload the dashboard json file in `loki` folder.
 It is a copy of the regular Uyuni dashboard with logs added to it.
+
+# TODO
+
+* Scrape `journal` logs
+* Remove the timestamp for the log lines for cleaner output?
+* Parse and unify the log levels in promtail?
+  The issue here is that `Critical` is showing in some log messages as parts of class names and probably we are missing some log entries due to slightly different wordings.
