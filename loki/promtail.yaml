@@ -1,0 +1,119 @@
+server:
+  http_listen_port: 9081
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://192.168.122.1:3100/loki/api/v1/push
+
+scrape_configs:
+- job_name: cobbler
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: cobbler 
+      __path__: /var/log/cobbler/cobbler.log
+  pipeline_stages:
+  - multiline:
+      firstline: '^(?P<time>[\dT:-]+) - [A-Z]+ | '
+  - regex:
+      expression: '^(?P<time>[\dT:-]+) '
+  - timestamp:
+      source: time
+      format: '2006-01-02T15:04:05'
+      location: CET
+- job_name: salt
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: salt
+      __path__: /var/log/salt/{api,master}
+  pipeline_stages:
+  - multiline:
+      firstline: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(,)\d{3} '
+  - replace:
+      expression: '^\[?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(,)'
+      replace: '.'
+  - regex:
+      expression: '^(?P<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) '
+  - timestamp:
+      source: time
+      format: '2006-01-02 15:04:05.000'
+      location: CET
+- job_name: rhn
+  pipeline_stages:
+  - drop:
+      expression: '^\d{2}:\d{2}:\d{2} \D'
+      drop_counter_reason: reposync_output
+  - drop:
+      expression: 'Legacy Hibernate behavior was to ignore the @DiscriminatorColumn|org\.hibernate\.orm\.deprecation'
+      drop_counter_reason: hibernate_deprecation
+  - multiline:
+      firstline: '^\[?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(,)\d{3}\]? '
+  - replace:
+      expression: '^\[?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(,)'
+      replace: '.'
+  - regex:
+      expression: '^\[?(?P<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\]? '
+  - timestamp:
+      source: time
+      format: '2006-01-02 15:04:05.000'
+      location: CET
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: rhn
+      component: tomcat
+      __path__: /var/log/rhn/rhn_{salt,web}_*log 
+  - targets:
+      - localhost
+    labels:
+      job: rhnlogs
+      component: taskomatic
+      __path__: /var/log/rhn/rhn_taskomatic_*log 
+- job_name: apache
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: apache
+      __path__: /var/log/apache2/*_log
+  pipeline_stages:
+  - match:
+      selector: '{job="apache"} |~ `^\[[A-Z][a-z]{2} `'
+      stages:
+      - drop:
+          expression: ' for stapling|ssl_stapling_init_cert'
+      - regex:
+          expression: '^\[(?P<time>[\d :.A-Za-z]+)\]'
+      - timestamp:
+          source: time
+          format: 'Mon Jan 02 15:04:05.000000 2006'
+          location: CET
+  - match:
+      selector: '{job="apache"} |~ `^\[\d{2}/[A-Z][a-z]{2}/`'
+      stages:
+      - regex:
+          expression: '^\[(?P<time>[\d A-Za-z:/+-]+)\] (?P<ip>[^ ]+)'
+      - timestamp:
+          source: time
+          format: '02/Jan/2006:15:04:05 -0700'
+          location: CET
+      - labels:
+          ip:
+  - match:
+      selector: '{job="apache"} |~ `^[A-Fa-f\d:.]+ - - \[[\d A-Za-z:/+-]+\]`'
+      stages:
+      - regex:
+          expression: '^(?P<ip>[^ ]+) - - \[(?P<time>[\d A-Za-z:/+-]+)\]'
+      - timestamp:
+          source: time
+          format: '02/Jan/2006:15:04:05 -0700'
+          location: CET
+      - labels:
+          ip:
