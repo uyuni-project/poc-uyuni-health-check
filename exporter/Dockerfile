@@ -4,7 +4,6 @@ LABEL maintainer Pablo Suárez Hernández <psuarezhernandez@suse.com>
 
 COPY requirements.txt /opt/
 COPY uyuni_health_exporter.py /opt/
-COPY uyuni-health-check.py /opt/
 COPY config.yml /opt/
 
 RUN zypper -n ref
