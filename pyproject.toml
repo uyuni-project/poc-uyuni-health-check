@@ -1,3 +1,26 @@
+[project]
+name = "uyuni-health-check"
+description = "Show Uyuni server health metrics and logs"
+readme = "README.md"
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+]
+maintainers = [
+    {name = "Pablo Suárez Hernández", email = "psuarezhernandez@suse.com"},
+]
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://github.com/meaksh/uyuni-health-check"
+tracker =  "https://github.com/meaksh/uyuni-health-check/issues"
+
+[project.scripts]
+uyuni-health-check = "uyuni_health_check.main:run"
+
 [tool.isort]
 multi_line_output = 3
 include_trailing_comma = true
@@ -11,9 +34,13 @@ ignore = "E203, E266, E501, W503, F403, F401, W605"
 max-line-length = 88
 max-complexity = 18
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [build-system]
 requires = [
     "setuptools>=42",
-    "wheel"
+    "setuptools_scm[toml]",
+    "wheel",
 ]
 build-backend = "setuptools.build_meta"

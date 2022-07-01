@@ -6,7 +6,8 @@ repos:
         additional_dependencies: ['toml']
         exclude: >
             (?x)^(
-                templates/.*|
+                loki/.*|
+                logcli/.*|
             )$
 
   - repo: https://github.com/psf/black
@@ -15,7 +16,8 @@ repos:
       - id: black
         exclude: >
           (?x)^(
-              templates/.*|
+              loki/.*|
+              logcli/.*|
           )$
 
   - repo: https://gitlab.com/pycqa/flake8

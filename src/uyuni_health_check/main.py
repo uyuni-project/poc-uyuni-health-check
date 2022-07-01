@@ -56,6 +56,14 @@ def summary_db():
     print("   - Completed: {}".format(len(completed_actions_last_day)))
 
 
-summary_db()
-jobs = find_salt_jobs()
-pprint(summary_salt_jobs(jobs))
+def run():
+    """
+    Main entry point for the tool
+    """
+    summary_db()
+    jobs = find_salt_jobs()
+    pprint(summary_salt_jobs(jobs))
+
+
+if __name__ == "__main__":
+    run()
