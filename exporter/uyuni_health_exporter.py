@@ -36,6 +36,12 @@ class UyuniDataGatherer(object):
         )
         return ret
 
+    def list_active_salt_jobs(self) -> dict:
+        start = time.time()
+        ret = self.runner.cmd("jobs.active")
+        print("* list_active_salt_jobs took: {} seconds".format(time.time() - start))
+        return ret
+
     def find_salt_jobs(self) -> dict:
         start = time.time()
         ret = self.runner.cmd("jobs.list_jobs")
@@ -58,7 +64,6 @@ class UyuniDataGatherer(object):
     def summarize_salt_jobs(self, jobs: dict) -> dict:
         summary = {
             "functions": {},
-            "total": 0,
         }
         for jid in jobs:
             if jobs[jid]["Function"] == "state.apply" and jobs[jid]["Arguments"][0].get(
@@ -71,7 +76,6 @@ class UyuniDataGatherer(object):
                 tag = jobs[jid]["Function"]
             summary["functions"].setdefault(tag, 0)
             summary["functions"][tag] += 1
-            summary["total"] += 1
         return summary
 
     def refresh(self):
@@ -92,6 +96,7 @@ class UyuniDataGatherer(object):
             x for x in self.actions_last_day if x["status"] == "2"
         ]
         self.salt_jobs = self.summarize_salt_jobs(self.find_salt_jobs())
+        self.active_salt_jobs = self.summarize_salt_jobs(self.list_active_salt_jobs())
         self.master_test_ping = self.test_ping()
         self.zeromq_alived_minions = self.salt_alived_minions()
         sys.stdout.flush()
@@ -111,23 +116,27 @@ class UyuniMetricsCollector(object):
         failed_actions_last_day = self.gatherer.failed_actions_last_day
         completed_actions_last_day = self.gatherer.completed_actions_last_day
         salt_jobs = self.gatherer.salt_jobs
+        active_salt_jobs = self.gatherer.active_salt_jobs
         master_test_ping = self.gatherer.master_test_ping
         zeromq_alived_minions = self.gatherer.zeromq_alived_minions
 
         gauge = GaugeMetricFamily(
-            "salt_jobs", "Salt jobs in the last 24 hours", labels=["salt_jobs"]
+            "salt_jobs", "Salt jobs in the last 24 hours", labels=["name", "fun"]
         )
-        gauge.add_metric(["salt_jobs_total"], salt_jobs["total"])
+        for func in active_salt_jobs["functions"]:
+            gauge.add_metric(
+                ["salt_jobs_active_{}_total".format(func), func], active_salt_jobs["functions"][func]
+            )
         for func in salt_jobs["functions"]:
             gauge.add_metric(
-                ["salt_jobs_{}_total".format(func)], salt_jobs["functions"][func]
+                ["salt_jobs_{}_total".format(func), func], salt_jobs["functions"][func]
             )
         yield gauge
 
         gauge2 = GaugeMetricFamily(
             "salt_master_stats",
             "Some stats from Salt master",
-            labels=["salt_master_stats"],
+            labels=["name"],
         )
         gauge2.add_metric(["salt_master_test_ping_duration_seconds"], master_test_ping)
         gauge2.add_metric(
@@ -140,7 +149,7 @@ class UyuniMetricsCollector(object):
         gauge3 = GaugeMetricFamily(
             "uyuni_summary",
             "Some relevant metrics in the context of Uyuni",
-            labels=["uyuni_summary"],
+            labels=["name"],
         )
         gauge3.add_metric(["uyuni_summary_channels_total"], int(channels[0]["count"]))
         gauge3.add_metric(["uyuni_summary_packages_total"], int(packages[0]["count"]))

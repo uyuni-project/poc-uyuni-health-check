@@ -1,11 +1,8 @@
 from pprint import pprint
 
-import salt.config
-import salt.runner
+from uyuni_health_exporter import UyuniDataGatherer
 
-master_opts = salt.config.client_config("/etc/salt/master")
-master_opts["quiet"] = True
-runner = salt.runner.RunnerClient(master_opts)
+gatherer = UyuniDataGatherer()
 
 
 def find_salt_jobs() -> dict:
