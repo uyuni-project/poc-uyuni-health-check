@@ -1,4 +1,6 @@
 import re
+import os.path
+import subprocess
 
 import click
 import requests
@@ -6,6 +8,13 @@ from rich import print
 from rich.markdown import Markdown
 from rich.pretty import pprint
 from rich.table import Table
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+
+class HealthException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
 
 
 def show_data(metrics: dict):
@@ -67,19 +76,51 @@ def show_uyuni_summary(metrics: dict):
     print(table)
 
 
+def build_image(name, path=None):
+    """
+    Build a container image
+    """
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}"),
+        TimeElapsedColumn(),
+    ) as progress:
+        exporter_task = progress.add_task(f"Build {name} image")
+
+        expanded_path = os.path.join(os.path.dirname(__file__), path or name)
+        progress.start_task(exporter_task)
+        try:
+            process = subprocess.Popen(
+                ["podman", "build", "-t", name, "."],
+                cwd=expanded_path,
+                stdout=subprocess.PIPE,
+            )
+            for line in process.stdout:
+                progress.log(line.decode().strip())
+            ret = process.wait()
+            if ret != 0:
+                raise HealthException(f"Failed to build {name} image")
+        except OSError:
+            raise HealthException("podman is required to build the container images")
+        finally:
+            progress.stop_task(exporter_task)
+
+
 def build():
     """
     Build the container images
     """
+    build_image("uyuni-health-exporter", "exporter")
+    build_image("logcli")
 
 
-def deploy_exporter(server, port):
+def deploy_exporter():
     """
     Deploy the prometheus exporter on the server
     """
 
 
-def deploy_promtail(server, port):
+def deploy_promtail():
     """
     Deploy promtail on the server
     """
@@ -92,7 +133,6 @@ def run_loki():
 
 
 @click.command()
-@click.option("-p", "--port", type=int, default=22, help="server SSH port")
 @click.option(
     "-ep",
     "--exporter-port",
@@ -101,34 +141,35 @@ def run_loki():
     help="uyuni health exporter metrics port",
 )
 @click.argument("server")
-def health_check(server, port, exporter_port):
+def health_check(server, exporter_port):
     """
     Build the necessary containers, deploy them, get the metrics and display them
 
     :param server: the server to connect to
-    :param port: the SSH port of the server
     :param exporter_port: uyuni health exporter metrics port
     """
+    console = Console()
+    try:
+        print(Markdown("- Building containers images"))
+        build()
 
-    # TODO build the containers
-    print(Markdown("- Building containers images"))
-    build()
+        # TODO Deploy the exporter
+        print(Markdown("- Deploying uyuni-health-exporter container"))
+        deploy_exporter()
 
-    # TODO Deploy the exporter
-    print(Markdown("- Deploying uyuni-health-exporter container"))
-    deploy_exporter(server, port)
+        # TODO Deploy promtail and Loki
+        print(Markdown("- Deploying promtail and Loki"))
+        deploy_promtail()
+        run_loki()
 
-    # TODO Deploy promtail and Loki
-    print(Markdown("- Deploying promtail and Loki"))
-    deploy_promtail(server, port)
-    run_loki()
+        # Fetch metrics from uyuni-health-exporter
+        print(Markdown("- Fetching metrics from uyuni-health-exporter"))
+        metrics = fetch_metrics_exporter(server, exporter_port)
 
-    # Fetch metrics from uyuni-health-exporter
-    print(Markdown("- Fetching metrics from uyuni-health-exporter"))
-    metrics = fetch_metrics_exporter(server, exporter_port)
-
-    # Gather and show the data
-    show_data(metrics)
+        # Gather and show the data
+        show_data(metrics)
+    except HealthException as err:
+        console.print("[red bold]" + str(err))
 
 
 def fetch_metrics_exporter(host, port=9000):
