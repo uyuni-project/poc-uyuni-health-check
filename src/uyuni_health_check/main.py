@@ -1,6 +1,9 @@
+import io
 import os.path
 import re
 import subprocess
+import zipfile
+from os import path
 
 import click
 import requests
@@ -76,7 +79,7 @@ def show_uyuni_summary(metrics: dict):
     print(table)
 
 
-def build_image(name, path=None):
+def build_image(name, image_path=None):
     """
     Build a container image
     """
@@ -87,7 +90,7 @@ def build_image(name, path=None):
     ) as progress:
         exporter_task = progress.add_task(f"Build {name} image")
 
-        expanded_path = os.path.join(os.path.dirname(__file__), path or name)
+        expanded_path = os.path.join(os.path.dirname(__file__), image_path or name)
         progress.start_task(exporter_task)
         try:
             process = subprocess.Popen(
@@ -111,6 +114,13 @@ def build():
     Build the container images
     """
     build_image("uyuni-health-exporter", "exporter")
+
+    # Fetch the logcli binary from the latest release
+    url = "https://github.com/grafana/loki/releases/download/v2.5.0/logcli-linux-amd64.zip"
+    dest_dir = os.path.join(os.path.dirname(__file__), "logcli")
+    response = requests.get(url)
+    zip = zipfile.ZipFile(io.BytesIO(response.content))
+    zip.extract("logcli-linux-amd64", dest_dir)
     build_image("logcli")
 
 

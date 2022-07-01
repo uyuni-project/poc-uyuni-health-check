@@ -10,6 +10,7 @@ classifiers = [
 dependencies = [
     "Click",
     "rich",
+    "requests",
 ]
 maintainers = [
     {name = "Pablo Suárez Hernández", email = "psuarezhernandez@suse.com"},
