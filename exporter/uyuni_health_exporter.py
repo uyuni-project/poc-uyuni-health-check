@@ -125,7 +125,8 @@ class UyuniMetricsCollector(object):
         )
         for func in active_salt_jobs["functions"]:
             gauge.add_metric(
-                ["salt_jobs_active_{}_total".format(func), func], active_salt_jobs["functions"][func]
+                ["salt_jobs_active_{}_total".format(func), func],
+                active_salt_jobs["functions"][func],
             )
         for func in salt_jobs["functions"]:
             gauge.add_metric(
