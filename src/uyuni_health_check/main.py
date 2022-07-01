@@ -5,6 +5,7 @@ import requests
 from rich import print
 from rich.markdown import Markdown
 from rich.pretty import pprint
+from rich.table import Table
 
 
 def show_data(metrics: dict):
@@ -15,9 +16,55 @@ def show_data(metrics: dict):
     # TODO Display them!
     print()
     print(Markdown("# Results"))
-
-    pprint(metrics)
+    show_salt_jobs_summary(metrics)
+    show_salt_master_stats(metrics)
+    show_uyuni_summary(metrics)
     print("[italic red]Data will soon be output here[/italic red]")
+
+
+def show_salt_jobs_summary(metrics: dict):
+    print(Markdown("- Summary of Salt jobs in last 24 hours"))
+    print()
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Salt function name")
+    table.add_column("Total")
+
+    for metric, value in sorted(
+        metrics["salt_jobs"].items(), reverse=True, key=lambda item: item[1]
+    ):
+        table.add_row(metric, str(int(value)))
+
+    print(table)
+
+
+def show_salt_master_stats(metrics: dict):
+    print(Markdown("- Salt Master stats"))
+    print()
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Name")
+    table.add_column("Total")
+
+    for metric, value in sorted(
+        metrics["salt_master_stats"].items(), key=lambda item: item[0]
+    ):
+        table.add_row(metric, str(int(value)))
+
+    print(table)
+
+
+def show_uyuni_summary(metrics: dict):
+    print(Markdown("- Uyuni Summary"))
+    print()
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Name")
+    table.add_column("Total")
+
+    for metric, value in sorted(
+        metrics["uyuni_summary"].items(), key=lambda item: item[0]
+    ):
+        table.add_row(metric, str(int(value)))
+
+    print(table)
 
 
 def build():
@@ -107,13 +154,13 @@ def fetch_metrics_exporter(host, port=9000):
     }
 
     for m in salt_metrics:
-        metrics["salt_jobs"][m[0]] = m[2]
+        metrics["salt_jobs"][m[0]] = float(m[2])
 
     for m in salt_master_metrics:
-        metrics["salt_master_stats"][m[0]] = m[1]
+        metrics["salt_master_stats"][m[0]] = float(m[1])
 
     for m in uyuni_metrics:
-        metrics["uyuni_summary"][m[0]] = m[1]
+        metrics["uyuni_summary"][m[0]] = float(m[1])
 
     return metrics
 
