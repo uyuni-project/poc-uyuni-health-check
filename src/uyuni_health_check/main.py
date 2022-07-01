@@ -16,15 +16,18 @@ def build():
     Build the container images
     """
 
+
 def deploy_exporter(server, port):
     """
     Deploy the prometheus exporter on the server
     """
 
+
 def deploy_promtail(server, port):
     """
     Deploy promtail on the server
     """
+
 
 def run_loki():
     """
@@ -33,8 +36,8 @@ def run_loki():
 
 
 @click.command()
-@click.option("-p", default=22, help="server SSH port")
-@click.argument("server", help="server to connect to")
+@click.option("-p", "--port", type=int, default=22, help="server SSH port")
+@click.argument("server")
 def health_check(server, port):
     """
     Build the necessary containers, deploy them, get the metrics and display them
