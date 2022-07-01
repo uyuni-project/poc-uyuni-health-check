@@ -1,15 +1,15 @@
-import re
 import os.path
+import re
 import subprocess
 
 import click
 import requests
 from rich import print
+from rich.console import Console
 from rich.markdown import Markdown
 from rich.pretty import pprint
-from rich.table import Table
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.table import Table
 
 
 class HealthException(Exception):
@@ -118,6 +118,41 @@ def deploy_exporter():
     """
     Deploy the prometheus exporter on the server
     """
+    id_process = subprocess.run(["id", "-g", "salt"], stdout=subprocess.PIPE)
+    if id_process.returncode != 0:
+        raise HealthException(
+            "Salt is not installed... is the tool running on an Uyuni server?"
+        )
+    salt_gid = id_process.stdout.decode().strip()
+
+    cmd = [
+        "podman",
+        "run",
+        "-u",
+        f"salt:{salt_gid}",
+        "-d",
+        "--rm",
+        '--network="host"',
+        "-v",
+        "/etc/salt:/etc/salt:ro",
+        "-v",
+        "/var/cache/salt/:/var/cache/salt",
+        "--name",
+        "uyuni-health-exporter",
+        "uyuni-health-exporter",
+    ]
+    try:
+        ps_process = subprocess.run(
+            ["podman", "ps", "-f", "name=eloquent_euler", "--quiet"],
+            stdout=subprocess.PIPE,
+        )
+        if ps_process.stdout == "":
+            subprocess.run(cmd, check=True)
+        print(
+            "No need to run the uyuni-health-exporter container as it is already running"
+        )
+    except OSError:
+        raise HealthException("podman is required to extract the data")
 
 
 def deploy_promtail():
