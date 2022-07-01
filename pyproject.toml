@@ -8,6 +8,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    "Click",
+    "rich",
 ]
 maintainers = [
     {name = "Pablo Suárez Hernández", email = "psuarezhernandez@suse.com"},
