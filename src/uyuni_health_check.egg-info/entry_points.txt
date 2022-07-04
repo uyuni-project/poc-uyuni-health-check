@@ -1,2 +1,0 @@
-[console_scripts]
-uyuni-health-check = uyuni_health_check.main:run
