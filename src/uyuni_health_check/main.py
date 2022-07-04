@@ -1,10 +1,11 @@
 import io
+import json
 import os
 import os.path
 import re
 import subprocess
 import zipfile
-from os import path
+from datetime import datetime, timedelta
 
 import click
 import requests
@@ -25,14 +26,68 @@ def show_data(metrics: dict):
     """
     Gather the data from the exporter and loki and display them
     """
-    # TODO Gather the data
-    # TODO Display them!
-    print()
     print(Markdown("# Results"))
     show_salt_jobs_summary(metrics)
     show_salt_master_stats(metrics)
     show_uyuni_summary(metrics)
-    print("[italic red]Data will soon be output here[/italic red]")
+
+
+def show_error_logs_stats(loki):
+    """
+    Get and show the error logs stats
+    """
+    loki_url = loki or "http://localhost:3100"
+    logcli_cmd = [
+        "podman",
+        "run",
+        "-ti",
+        "--rm",
+        "--name",
+        "logcli",
+        "logcli",
+        "--quiet",
+        f"--addr={loki_url}",
+        "instant-query",
+        'count_over_time({job=~".+"} |~ `(?i)error` [7d])',
+    ]
+    process = subprocess.run(logcli_cmd, stdout=subprocess.PIPE)
+    data = json.loads(process.stdout)
+
+    print(Markdown("- Errors in logs over the last 7 days"))
+    print()
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("File")
+    table.add_column("Errors")
+
+    for metric in data:
+        table.add_row(metric["metric"]["filename"], metric["value"][1])
+
+    print(table)
+
+
+def show_full_error_logs(loki):
+    """
+    Get and show the error logs
+    """
+    loki_url = loki or "http://localhost:3100"
+    from_time = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    logcli_cmd = [
+        "podman",
+        "run",
+        "-ti",
+        "--rm",
+        "--name",
+        "logcli",
+        "logcli",
+        "--quiet",
+        f"--addr={loki_url}",
+        "query",
+        f"--from={from_time}Z",
+        "--limit=100",
+        '{job=~".+"} |~ `(?i)error`',
+    ]
+    print(Markdown("- Error logs of the last 7 days"))
+    subprocess.run(logcli_cmd)
 
 
 def show_salt_jobs_summary(metrics: dict):
@@ -248,7 +303,13 @@ def run_loki():
     default=None,
     help="Uyuni Server to connect to if not running directly on the server",
 )
-def health_check(server, exporter_port, loki):
+@click.option(
+    "--logs",
+    default=False,
+    type=bool,
+    help="Show the error logs",
+)
+def health_check(server, exporter_port, loki, logs):
     """
     Build the necessary containers, deploy them, get the metrics and display them
 
@@ -277,6 +338,9 @@ def health_check(server, exporter_port, loki):
 
         # Gather and show the data
         show_data(metrics)
+        show_error_logs_stats(loki)
+        if logs:
+            show_full_error_logs(loki)
     except HealthException as err:
         console.print("[red bold]" + str(err))
 

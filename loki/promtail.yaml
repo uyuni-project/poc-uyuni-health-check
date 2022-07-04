@@ -73,7 +73,7 @@ scrape_configs:
   - targets:
       - localhost
     labels:
-      job: rhnlogs
+      job: rhn
       component: taskomatic
       __path__: /var/log/rhn/rhn_taskomatic_*log 
 - job_name: apache
