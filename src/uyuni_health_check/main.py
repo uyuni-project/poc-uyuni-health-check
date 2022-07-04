@@ -13,7 +13,6 @@ from rich import print
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.pretty import pprint
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 
@@ -139,37 +138,42 @@ def build_image(name, image_path=None):
     """
     Build a container image
     """
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("{task.description}"),
-        TimeElapsedColumn(),
-    ) as progress:
-        exporter_task = progress.add_task(f"Build {name} image")
+    print(f"Building {name} image")
 
-        expanded_path = os.path.join(os.path.dirname(__file__), image_path or name)
-        progress.start_task(exporter_task)
-        try:
-            process = subprocess.Popen(
-                ["podman", "build", "-t", name, "."],
-                cwd=expanded_path,
-                stdout=subprocess.PIPE,
-            )
-            for line in process.stdout:
-                progress.log(line.decode().strip())
-            ret = process.wait()
-            if ret != 0:
-                raise HealthException(f"Failed to build {name} image")
-        except OSError:
-            raise HealthException("podman is required to build the container images")
-        finally:
-            progress.stop_task(exporter_task)
+    expanded_path = os.path.join(os.path.dirname(__file__), image_path or name)
+    try:
+        process = subprocess.run(
+            ["podman", "build", "-t", name, "."],
+            cwd=expanded_path,
+            stdout=subprocess.PIPE,
+        )
+        if process.returncode != 0:
+            raise HealthException(f"Failed to build {name} image")
+    except OSError:
+        raise HealthException("podman is required to build the container images")
 
 
-def build():
+def image_exists(image):
+    """
+    Check if the image is present in podman images result
+    """
+    try:
+        process = subprocess.run(
+            ["podman", "images", "--quiet", "-f", f"reference={image}"],
+            stdout=subprocess.PIPE,
+        )
+        return process.stdout.decode() != ""
+    except OSError:
+        raise HealthException("podman is required to build the container images")
+
+
+def build_logcli():
     """
     Build the container images
     """
-    build_image("uyuni-health-exporter", "exporter")
+    if image_exists("logcli"):
+        print("Skipped as the logcli image is already present")
+        return
 
     # Fetch the logcli binary from the latest release
     url = "https://github.com/grafana/loki/releases/download/v2.5.0/logcli-linux-amd64.zip"
@@ -197,12 +201,18 @@ def ssh_call(server, cmd):
     return process
 
 
-def deploy_exporter(server):
+def prepare_exporter(server):
     """
-    Deploy the prometheus exporter on the server
+    Build the prometheus exporter image and deploy it on the server
 
     :param server: the Uyuni server to deploy the exporter on
     """
+    if image_exists("uyuni-health-exporter"):
+        print("Skipped as the uyuni-health-exporter image is already present")
+        return
+
+    build_image("uyuni-health-exporter", "exporter")
+
     id_cmd = ["id", "-g", "salt"]
     id_process = ssh_call(server, id_cmd)
     if id_process.returncode != 0:
@@ -318,11 +328,11 @@ def health_check(server, exporter_port, loki, logs):
     """
     console = Console()
     try:
-        print(Markdown("- Building containers images"))
-        build()
+        print(Markdown("- Preparing uyuni-health-exporter"))
+        prepare_exporter(server)
 
-        print(Markdown("- Deploying uyuni-health-exporter container"))
-        deploy_exporter(server)
+        print(Markdown("- Building logcli image"))
+        build_logcli()
 
         print(Markdown("- Deploying promtail and Loki"))
         if not loki:
