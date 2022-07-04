@@ -11,9 +11,9 @@ This can be modified by increasing the value of `reject_old_samples_max_age` in 
 
 In order to persist Loki's data:
 
-    mkdir /var/run/loki
-    chown loki:loki /var/run/loki
-    sed -i 's/\/tmp\/loki/\/var\/run\/loki/' /etc/loki/loki.yaml
+    mkdir /var/lib/loki
+    chown loki:loki /var/lib/loki
+    sed -i 's/\/tmp\/loki/\/var\/lib\/loki/' /etc/loki/loki.yaml
 
 For now loki has no authentication mechanism.
 
