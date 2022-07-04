@@ -1,4 +1,5 @@
 import io
+import os
 import os.path
 import re
 import subprocess
@@ -124,40 +125,91 @@ def build():
     build_image("logcli")
 
 
-def deploy_exporter():
+def ssh_call(server, cmd):
+    """
+    Run a command over SSH.
+
+    If the server value is `None` run the command locally.
+
+    For now the function assumes passwordless connection to the server on default SSH port.
+    Use SSH agent and config to adjust if needed.
+    """
+    if server:
+        ssh_cmd = ["ssh", "-q", server] + cmd
+    else:
+        ssh_cmd = cmd
+    process = subprocess.run(ssh_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return process
+
+
+def deploy_exporter(server):
     """
     Deploy the prometheus exporter on the server
+
+    :param server: the Uyuni server to deploy the exporter on
     """
-    id_process = subprocess.run(["id", "-g", "salt"], stdout=subprocess.PIPE)
+    id_cmd = ["id", "-g", "salt"]
+    id_process = ssh_call(server, id_cmd)
     if id_process.returncode != 0:
-        raise HealthException(
-            "Salt is not installed... is the tool running on an Uyuni server?"
-        )
+        if "no such user" in id_process.stderr:
+            raise HealthException(
+                "Salt is not installed... is the tool running on an Uyuni server?"
+            )
+        else:
+            raise HealthException(
+                f"Failed to get Salt GID on server: {id_process.stderr}"
+            )
     salt_gid = id_process.stdout.decode().strip()
 
-    cmd = [
-        "podman",
-        "run",
-        "-u",
-        f"salt:{salt_gid}",
-        "-d",
-        "--rm",
-        '--network="host"',
-        "-v",
-        "/etc/salt:/etc/salt:ro",
-        "-v",
-        "/var/cache/salt/:/var/cache/salt",
-        "--name",
-        "uyuni-health-exporter",
-        "uyuni-health-exporter",
-    ]
-    try:
-        ps_process = subprocess.run(
-            ["podman", "ps", "-f", "name=eloquent_euler", "--quiet"],
-            stdout=subprocess.PIPE,
+    if server:
+        # Save, deploy and load the image
+        # TODO Handle errors
+        if os.path.exists("/tmp/uyuni-health-exporter.tar"):
+            # podman doesn't like if the image is already present
+            os.unlink("/tmp/uyuni-health-exporter.tar")
+
+        print("Saving the uyuni-health-exporter image...")
+        subprocess.run(
+            [
+                "podman",
+                "save",
+                "--output",
+                "/tmp/uyuni-health-exporter.tar",
+                "uyuni-health-exporter",
+            ]
         )
-        if ps_process.stdout == "":
-            subprocess.run(cmd, check=True)
+
+        print(f"Transfering the uyuni-health-exporter image to {server}...")
+        subprocess.run(["scp", "/tmp/uyuni-health-exporter.tar", f"{server}:/tmp/"])
+
+        print(f"Loading the uyuni-health-exporter image on {server}...")
+        ssh_call(
+            server, ["podman", "load", "--input", "/tmp/uyuni-health-exporter.tar"]
+        )
+
+    # Run the container
+    try:
+        ps_process = ssh_call(
+            server, ["podman", "ps", "-f", "name=uyuni-health-exporter", "--quiet"]
+        )
+        if ps_process.stdout.decode() == "":
+            run_cmd = [
+                "podman",
+                "run",
+                "-u",
+                f"salt:{salt_gid}",
+                "-d",
+                "--rm",
+                '--network="host"',
+                "-v",
+                "/etc/salt:/etc/salt:ro",
+                "-v",
+                "/var/cache/salt/:/var/cache/salt",
+                "--name",
+                "uyuni-health-exporter",
+                "uyuni-health-exporter",
+            ]
+            ssh_call(server, run_cmd)
         print(
             "No need to run the uyuni-health-exporter container as it is already running"
         )
@@ -185,27 +237,39 @@ def run_loki():
     default=9000,
     help="uyuni health exporter metrics port",
 )
-@click.argument("server")
-def health_check(server, exporter_port):
+@click.option(
+    "--loki",
+    default=None,
+    help="URL of an existing loki instance to use to fetch the logs",
+)
+@click.option(
+    "-s",
+    "--server",
+    default=None,
+    help="Uyuni Server to connect to if not running directly on the server",
+)
+def health_check(server, exporter_port, loki):
     """
     Build the necessary containers, deploy them, get the metrics and display them
 
     :param server: the server to connect to
     :param exporter_port: uyuni health exporter metrics port
+    :param loki: URL to a loki instance. Setting it will skip the promtail and loki deployments
     """
     console = Console()
     try:
         print(Markdown("- Building containers images"))
         build()
 
-        # TODO Deploy the exporter
         print(Markdown("- Deploying uyuni-health-exporter container"))
-        deploy_exporter()
+        deploy_exporter(server)
 
-        # TODO Deploy promtail and Loki
         print(Markdown("- Deploying promtail and Loki"))
-        deploy_promtail()
-        run_loki()
+        if not loki:
+            deploy_promtail()
+            run_loki()
+        else:
+            console.print(f"Skipped to use Loki at {loki}")
 
         # Fetch metrics from uyuni-health-exporter
         print(Markdown("- Fetching metrics from uyuni-health-exporter"))
@@ -217,7 +281,7 @@ def health_check(server, exporter_port):
         console.print("[red bold]" + str(err))
 
 
-def fetch_metrics_exporter(host, port=9000):
+def fetch_metrics_exporter(host="localhost", port=9000):
     try:
         metrics_raw = requests.get(f"http://{host}:{port}").content.decode()
     except requests.exceptions.RequestException as exc:
