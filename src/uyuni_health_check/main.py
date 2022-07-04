@@ -305,8 +305,7 @@ def run_loki():
 )
 @click.option(
     "--logs",
-    default=False,
-    type=bool,
+    is_flag=True,
     help="Show the error logs",
 )
 def health_check(server, exporter_port, loki, logs):
