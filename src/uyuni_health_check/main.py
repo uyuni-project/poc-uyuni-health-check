@@ -102,12 +102,11 @@ def show_full_error_logs(loki):
         '{job=~".+"} |~ `(?i)error`',
     ]
     print(Markdown("- Error logs of the last 7 days"))
-    subprocess.run(logcli_cmd)
+    process = subprocess.run(logcli_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return process
 
 
 def show_salt_jobs_summary(metrics: dict):
-    print(Markdown("- Summary of Salt jobs in last 24 hours"))
-    print()
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Salt function name")
     table.add_column("Total")
@@ -117,12 +116,10 @@ def show_salt_jobs_summary(metrics: dict):
     ):
         table.add_row(metric, str(int(value)))
 
-    print(table)
+    return table
 
 
 def show_salt_master_stats(metrics: dict):
-    print(Markdown("- Salt Master stats"))
-    print()
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Name")
     table.add_column("Total")
@@ -132,12 +129,10 @@ def show_salt_master_stats(metrics: dict):
     ):
         table.add_row(metric, str(int(value)))
 
-    print(table)
+    return table
 
 
 def show_uyuni_summary(metrics: dict):
-    print(Markdown("- Uyuni Summary"))
-    print()
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Name")
     table.add_column("Total")
