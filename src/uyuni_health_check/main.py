@@ -359,7 +359,7 @@ def prepare_exporter(server, verbose=False):
                 f"salt:{salt_gid}",
                 "-d",
                 "--rm",
-                '--network="host"',
+                "--network=host",
                 "-v",
                 "/etc/salt:/etc/salt:ro",
                 "-v",
