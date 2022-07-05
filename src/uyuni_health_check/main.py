@@ -145,18 +145,20 @@ def show_uyuni_summary(metrics: dict):
     return table
 
 
-def build_image(name, image_path=None):
+def build_image(name, image_path=None, verbose=False):
     """
     Build a container image
     """
-    print(f"Building {name} image")
-
     expanded_path = os.path.join(os.path.dirname(__file__), image_path or name)
     try:
+        kw = {}
+        if not verbose:
+           kw["stdout"] = subprocess.DEVNULL
+           kw["stderr"] = subprocess.DEVNULL
         process = subprocess.run(
             ["podman", "build", "-t", name, "."],
             cwd=expanded_path,
-            stdout=subprocess.PIPE,
+            **kw
         )
         if process.returncode != 0:
             raise HealthException(f"Failed to build {name} image")
@@ -178,7 +180,6 @@ def image_exists(image):
         raise HealthException("podman is required to build the container images")
 
 
-def build_logcli():
 def check_postgres_service(server):
     """
     Check that postgresql service is running
@@ -242,6 +243,7 @@ def container_is_running(name):
         raise HealthException("podman is required to build the container images")
 
 
+def build_logcli(verbose=False):
     """
     Build the container images
     """
@@ -255,7 +257,8 @@ def container_is_running(name):
     response = requests.get(url)
     zip = zipfile.ZipFile(io.BytesIO(response.content))
     zip.extract("logcli-linux-amd64", dest_dir)
-    build_image("logcli")
+    build_image("logcli", verbose=verbose)
+    console.log("[green]The logcli image was built successfully")
 
 
 def ssh_call(server, cmd):
@@ -313,7 +316,7 @@ def prepare_exporter(server, verbose=False):
             # podman doesn't like if the image is already present
             os.unlink("/tmp/uyuni-health-exporter.tar")
 
-        print("Saving the uyuni-health-exporter image...")
+        console.log("Saving the uyuni-health-exporter image...")
         subprocess.run(
             [
                 "podman",
@@ -324,10 +327,10 @@ def prepare_exporter(server, verbose=False):
             ]
         )
 
-        print(f"Transfering the uyuni-health-exporter image to {server}...")
+        console.log(f"Transfering the uyuni-health-exporter image to {server}...")
         subprocess.run(["scp", "/tmp/uyuni-health-exporter.tar", f"{server}:/tmp/"])
 
-        print(f"Loading the uyuni-health-exporter image on {server}...")
+        console.log(f"Loading the uyuni-health-exporter image on {server}...")
         ssh_call(
             server, ["podman", "load", "--input", "/tmp/uyuni-health-exporter.tar"]
         )
@@ -355,9 +358,13 @@ def prepare_exporter(server, verbose=False):
                 "uyuni-health-exporter",
             ]
             ssh_call(server, run_cmd)
-        print(
-            "No need to run the uyuni-health-exporter container as it is already running"
-        )
+            console.log(
+                "[green]The uyuni-health-exporter container was started. You would probably need to wait some seconds until getting metrics"
+            )
+        else:
+            console.log(
+                "[yellow]No need to run the uyuni-health-exporter container as it is already running"
+            )
     except OSError:
         raise HealthException("podman is required to extract the data")
 
@@ -366,12 +373,14 @@ def deploy_promtail():
     """
     Deploy promtail on the server
     """
+    console.log("[grey35]Not implemented yet!")
 
 
 def run_loki():
     """
     Run loki to aggregate the logs
     """
+    console.log("[grey35]Not implemented yet!")
 
 
 @click.command()
@@ -398,7 +407,13 @@ def run_loki():
     is_flag=True,
     help="Show the error logs",
 )
-def health_check(server, exporter_port, loki, logs):
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Show more stdout, including image building",
+)
+def health_check(server, exporter_port, loki, logs, verbose):
     """
     Build the necessary containers, deploy them, get the metrics and display them
 
@@ -406,32 +421,49 @@ def health_check(server, exporter_port, loki, logs):
     :param exporter_port: uyuni health exporter metrics port
     :param loki: URL to a loki instance. Setting it will skip the promtail and loki deployments
     """
-    console = Console()
     try:
-        print(Markdown("- Preparing uyuni-health-exporter"))
-        prepare_exporter(server)
+        with console.status(status=None) as status:
+            console.log("[bold]Preparing uyuni-health-exporter")
+            prepare_exporter(server, verbose=verbose)
 
-        print(Markdown("- Building logcli image"))
-        build_logcli()
+            console.log("[bold]Building logcli image")
+            build_logcli()
 
-        print(Markdown("- Deploying promtail and Loki"))
-        if not loki:
-            deploy_promtail()
-            run_loki()
-        else:
-            console.print(f"Skipped to use Loki at {loki}")
+            if not loki:
+                console.log("[bold]Deploying promtail and Loki")
+                deploy_promtail()
+                console.log("[bold]Run promtail and Loki")
+                run_loki()
+            else:
+                console.log(f"[yellow]Skipped to use Loki at {loki}")
 
-        # Fetch metrics from uyuni-health-exporter
-        print(Markdown("- Fetching metrics from uyuni-health-exporter"))
-        metrics = fetch_metrics_exporter(server, exporter_port)
+            # Fetch metrics from uyuni-health-exporter
+            console.log("[bold]Fetching metrics from uyuni-health-exporter")
+            metrics = fetch_metrics_exporter(server, exporter_port)
+
+            # Check spacewalk services
+            console.log("[bold]Checking spacewalk services")
+            check_spacewalk_services(server, verbose=verbose)
+
+            # Check spacewalk services
+            console.log("[bold]Checking postgresql service")
+            check_postgres_service(server)
 
         # Gather and show the data
+        console.print(Markdown("# Results"))
         show_data(metrics)
-        show_error_logs_stats(loki)
-        if logs:
-            show_full_error_logs(loki)
+
+        console.print(Markdown("## Relevant Errors"))
+        if not container_is_running("logcli"):
+            console.print("[yellow]loki / logcli container is not running", justify="center")
+        else:
+            show_error_logs_stats(loki)
+            if logs:
+                show_full_error_logs(loki)
+
+        show_relevant_hints()
     except HealthException as err:
-        console.print("[red bold]" + str(err))
+        console.log("[red bold]" + str(err))
 
 
 def fetch_metrics_exporter(host="localhost", port=9000):
@@ -465,6 +497,7 @@ def fetch_metrics_exporter(host="localhost", port=9000):
     for m in uyuni_metrics:
         metrics["uyuni_summary"][m[0]] = float(m[1])
 
+    console.log("[green]metrics have been successfully collected")
     return metrics
 
 
