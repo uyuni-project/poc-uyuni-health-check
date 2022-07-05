@@ -223,7 +223,7 @@ def check_spacewalk_services(server, verbose=False):
         for service in services:
             process = ssh_call(server, ["systemctl", "status", service])
             if process.returncode != 0:
-                msg = "[bold red]WARNING: '{service}' service is NOT running!"
+                msg = f"[bold red]WARNING: '{service}' service is NOT running!"
                 console.log(msg)
                 _hints.append(msg)
                 all_running = False
