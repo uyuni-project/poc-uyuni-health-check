@@ -142,7 +142,7 @@ def show_uyuni_summary(metrics: dict):
     ):
         table.add_row(metric, str(int(value)))
 
-    print(table)
+    return table
 
 
 def build_image(name, image_path=None):
@@ -179,11 +179,74 @@ def image_exists(image):
 
 
 def build_logcli():
+def check_postgres_service(server):
+    """
+    Check that postgresql service is running
+    """
+    try:
+        process = ssh_call(server,
+            ["systemctl", "status", "postgresql"]
+        )
+        if process.returncode != 0:
+            msg = f"[bold red]WARNING: 'postgresql' service is NOT running!"
+            _hints.append(msg)
+            console.log(msg)
+        else:
+            console.log(f"[green]The postgresql service is running")
+    except OSError:
+        raise HealthException(f"The specified server '{server}' is not and Uyuni / SUSE Manager server!")
+
+
+def check_spacewalk_services(server, verbose=False):
+    """
+    Check that spacewalk services are running
+    """
+    try:
+        process = ssh_call(server,
+            ["spacewalk-service", "list"]
+        )
+        if process.returncode != 0:
+            raise HealthException(f"Failed to check spacewalk services")
+
+        services = re.findall(r"(.+)\.service .*", process.stdout.decode())
+        if verbose:
+            console.log(f"Spacewalk services: {services}")
+        all_running = True
+        for service in services:
+            process = ssh_call(server,
+                ["systemctl", "status", service]
+            )
+            if process.returncode != 0:
+                msg = f"[bold red]WARNING: '{service}' service is NOT running!"
+                console.log(msg)
+                _hints.append(msg)
+                all_running = False
+        if all_running:
+                console.log(f"[green]All spacewalk services are running")
+
+    except OSError:
+        raise HealthException(f"The specified server '{server}' is not and Uyuni / SUSE Manager server!")
+
+
+def container_is_running(name):
+    """
+    Check if a container with a given name is running in podman
+    """
+    try:
+        process = subprocess.run(
+            ["podman", "ps", "--quiet", "-f", f"name={name}"],
+            stdout=subprocess.PIPE,
+        )
+        return process.stdout.decode() != ""
+    except OSError:
+        raise HealthException("podman is required to build the container images")
+
+
     """
     Build the container images
     """
     if image_exists("logcli"):
-        print("Skipped as the logcli image is already present")
+        console.log("[yellow]Skipped as the logcli image is already present")
         return
 
     # Fetch the logcli binary from the latest release
@@ -212,17 +275,23 @@ def ssh_call(server, cmd):
     return process
 
 
-def prepare_exporter(server):
+def prepare_exporter(server, verbose=False):
     """
     Build the prometheus exporter image and deploy it on the server
 
     :param server: the Uyuni server to deploy the exporter on
     """
+    console.log("[bold]Building uyuni-health-exporter image")
     if image_exists("uyuni-health-exporter"):
-        print("Skipped as the uyuni-health-exporter image is already present")
-        return
+        console.log("[yellow]Skipped as the uyuni-health-exporter image is already present")
+    else:
+        build_image("uyuni-health-exporter", "exporter", verbose=verbose)
+        console.log("[green]The uyuni-health-exporter image was built successfully")
 
-    build_image("uyuni-health-exporter", "exporter")
+    console.log("[bold]Deploying uyuni-health-exporter container")
+    if container_is_running("uyuni-health-exporter"):
+        console.log("[yellow]Skipped as the uyuni-health-exporter container is already running")
+        return
 
     id_cmd = ["id", "-g", "salt"]
     id_process = ssh_call(server, id_cmd)
