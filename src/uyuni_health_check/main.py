@@ -61,7 +61,12 @@ def show_error_logs_stats(loki):
         'count_over_time({job=~".+"} |~ `(?i)error` [7d])',
     ]
     process = subprocess.run(logcli_cmd, stdout=subprocess.PIPE)
-    data = json.loads(process.stdout)
+    try:
+        data = json.loads(process.stdout)
+    except:
+        print("[bold red]There was an error when fetching data from Loki")
+        print(f"[bold red]{process.stdout.decode()}")
+        return
 
     print(Markdown("- Errors in logs over the last 7 days"))
     print()
