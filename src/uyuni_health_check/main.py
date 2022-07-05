@@ -4,6 +4,7 @@ import os
 import os.path
 import re
 import subprocess
+import time
 import zipfile
 from datetime import datetime, timedelta
 
@@ -33,13 +34,23 @@ def show_data(metrics: dict):
     console.print(Markdown("## Uyuni server and Salt Master stats"))
     console.print()
     if metrics:
-       tables = []
-       tables.append(show_salt_jobs_summary(metrics))
-       tables.append(show_salt_master_stats(metrics))
-       tables.append(show_uyuni_summary(metrics))
-       console.print(Columns(tables), justify="center")
+        tables = []
+        tables.append(show_salt_jobs_summary(metrics))
+        tables.append(show_salt_master_stats(metrics))
+        tables.append(show_uyuni_summary(metrics))
+        console.print(Columns(tables), justify="center")
     else:
-       console.print("[yellow]Some metrics are still missing. Wait some seconds and execute again", justify="center")
+        console.print(
+            "[yellow]Some metrics are still missing. Wait some seconds and execute again",
+            justify="center",
+        )
+
+
+def show_relevant_hints():
+    console.print(Markdown("## Relevant hints. Please take a look!"))
+    console.print()
+    for hint in _hints:
+        console.print(hint, justify="center")
 
 
 def show_error_logs_stats(loki):
@@ -153,12 +164,10 @@ def build_image(name, image_path=None, verbose=False):
     try:
         kw = {}
         if not verbose:
-           kw["stdout"] = subprocess.DEVNULL
-           kw["stderr"] = subprocess.DEVNULL
+            kw["stdout"] = subprocess.DEVNULL
+            kw["stderr"] = subprocess.DEVNULL
         process = subprocess.run(
-            ["podman", "build", "-t", name, "."],
-            cwd=expanded_path,
-            **kw
+            ["podman", "build", "-t", name, "."], cwd=expanded_path, **kw
         )
         if process.returncode != 0:
             raise HealthException(f"Failed to build {name} image")
@@ -185,9 +194,7 @@ def check_postgres_service(server):
     Check that postgresql service is running
     """
     try:
-        process = ssh_call(server,
-            ["systemctl", "status", "postgresql"]
-        )
+        process = ssh_call(server, ["systemctl", "status", "postgresql"])
         if process.returncode != 0:
             msg = f"[bold red]WARNING: 'postgresql' service is NOT running!"
             _hints.append(msg)
@@ -195,7 +202,9 @@ def check_postgres_service(server):
         else:
             console.log(f"[green]The postgresql service is running")
     except OSError:
-        raise HealthException(f"The specified server '{server}' is not and Uyuni / SUSE Manager server!")
+        raise HealthException(
+            f"The specified server '{server}' is not and Uyuni / SUSE Manager server!"
+        )
 
 
 def check_spacewalk_services(server, verbose=False):
@@ -203,9 +212,7 @@ def check_spacewalk_services(server, verbose=False):
     Check that spacewalk services are running
     """
     try:
-        process = ssh_call(server,
-            ["spacewalk-service", "list"]
-        )
+        process = ssh_call(server, ["spacewalk-service", "list"])
         if process.returncode != 0:
             raise HealthException(f"Failed to check spacewalk services")
 
@@ -214,19 +221,19 @@ def check_spacewalk_services(server, verbose=False):
             console.log(f"Spacewalk services: {services}")
         all_running = True
         for service in services:
-            process = ssh_call(server,
-                ["systemctl", "status", service]
-            )
+            process = ssh_call(server, ["systemctl", "status", service])
             if process.returncode != 0:
                 msg = f"[bold red]WARNING: '{service}' service is NOT running!"
                 console.log(msg)
                 _hints.append(msg)
                 all_running = False
         if all_running:
-                console.log(f"[green]All spacewalk services are running")
+            console.log(f"[green]All spacewalk services are running")
 
     except OSError:
-        raise HealthException(f"The specified server '{server}' is not and Uyuni / SUSE Manager server!")
+        raise HealthException(
+            f"The specified server '{server}' is not and Uyuni / SUSE Manager server!"
+        )
 
 
 def container_is_running(name):
@@ -286,14 +293,18 @@ def prepare_exporter(server, verbose=False):
     """
     console.log("[bold]Building uyuni-health-exporter image")
     if image_exists("uyuni-health-exporter"):
-        console.log("[yellow]Skipped as the uyuni-health-exporter image is already present")
+        console.log(
+            "[yellow]Skipped as the uyuni-health-exporter image is already present"
+        )
     else:
         build_image("uyuni-health-exporter", "exporter", verbose=verbose)
         console.log("[green]The uyuni-health-exporter image was built successfully")
 
     console.log("[bold]Deploying uyuni-health-exporter container")
     if container_is_running("uyuni-health-exporter"):
-        console.log("[yellow]Skipped as the uyuni-health-exporter container is already running")
+        console.log(
+            "[yellow]Skipped as the uyuni-health-exporter container is already running"
+        )
         return
 
     id_cmd = ["id", "-g", "salt"]
@@ -422,7 +433,7 @@ def health_check(server, exporter_port, loki, logs, verbose):
     :param loki: URL to a loki instance. Setting it will skip the promtail and loki deployments
     """
     try:
-        with console.status(status=None) as status:
+        with console.status(status=None):
             console.log("[bold]Preparing uyuni-health-exporter")
             prepare_exporter(server, verbose=verbose)
 
@@ -455,7 +466,9 @@ def health_check(server, exporter_port, loki, logs, verbose):
 
         console.print(Markdown("## Relevant Errors"))
         if not container_is_running("logcli"):
-            console.print("[yellow]loki / logcli container is not running", justify="center")
+            console.print(
+                "[yellow]loki / logcli container is not running", justify="center"
+            )
         else:
             show_error_logs_stats(loki)
             if logs:
