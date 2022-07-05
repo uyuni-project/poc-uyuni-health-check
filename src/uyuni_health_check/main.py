@@ -49,8 +49,14 @@ def show_data(metrics: dict):
 def show_relevant_hints():
     console.print(Markdown("## Relevant hints. Please take a look!"))
     console.print()
-    for hint in _hints:
-        console.print(hint, justify="center")
+
+    if not _hints:
+        console.print("[italic]There are no relevant hints", justify="center")
+    else:
+        for hint in _hints:
+            console.print(hint, justify="center")
+
+    console.print()
 
 
 def show_error_logs_stats(loki):
