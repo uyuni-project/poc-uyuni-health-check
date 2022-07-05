@@ -324,40 +324,52 @@ def prepare_exporter(server, verbose=False):
             raise HealthException(
                 f"Failed to get Salt GID on server: {id_process.stderr}"
             )
+
     salt_gid = id_process.stdout.decode().strip()
 
-    if server:
-        # Save, deploy and load the image
-        # TODO Handle errors
-        if os.path.exists("/tmp/uyuni-health-exporter.tar"):
-            # podman doesn't like if the image is already present
-            os.unlink("/tmp/uyuni-health-exporter.tar")
-
-        console.log("Saving the uyuni-health-exporter image...")
-        subprocess.run(
-            [
-                "podman",
-                "save",
-                "--output",
-                "/tmp/uyuni-health-exporter.tar",
-                "uyuni-health-exporter",
-            ]
-        )
-
-        console.log(f"Transfering the uyuni-health-exporter image to {server}...")
-        subprocess.run(["scp", "/tmp/uyuni-health-exporter.tar", f"{server}:/tmp/"])
-
-        console.log(f"Loading the uyuni-health-exporter image on {server}...")
-        ssh_call(
-            server, ["podman", "load", "--input", "/tmp/uyuni-health-exporter.tar"]
-        )
-
-    # Run the container
+    # Run the container in case not running
     try:
         ps_process = ssh_call(
             server, ["podman", "ps", "-f", "name=uyuni-health-exporter", "--quiet"]
         )
         if ps_process.stdout.decode() == "":
+            if server:
+                # Save, deploy and load the image in case not deployed
+                # TODO Handle errors
+                if os.path.exists("/tmp/uyuni-health-exporter.tar"):
+                    # podman doesn't like if the image is already present
+                    os.unlink("/tmp/uyuni-health-exporter.tar")
+
+                kw = {}
+                if not verbose:
+                    kw["stdout"] = subprocess.DEVNULL
+                    kw["stderr"] = subprocess.DEVNULL
+
+                console.log("Saving the uyuni-health-exporter image...")
+                subprocess.run(
+                    [
+                        "podman",
+                        "save",
+                        "--output",
+                        "/tmp/uyuni-health-exporter.tar",
+                        "uyuni-health-exporter",
+                    ],
+                    **kw,
+                )
+
+                console.log(
+                    f"Transfering the uyuni-health-exporter image to {server}..."
+                )
+                subprocess.run(
+                    ["scp", "/tmp/uyuni-health-exporter.tar", f"{server}:/tmp/"], **kw
+                )
+
+                console.log(f"Loading the uyuni-health-exporter image on {server}...")
+                ssh_call(
+                    server,
+                    ["podman", "load", "--input", "/tmp/uyuni-health-exporter.tar"],
+                )
+
             run_cmd = [
                 "podman",
                 "run",
