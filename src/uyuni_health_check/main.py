@@ -13,12 +13,17 @@ from rich import print
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.pretty import pprint
+from rich.columns import Columns
 from rich.table import Table
 
 
 class HealthException(Exception):
     def __init__(self, message):
         super().__init__(message)
+
+
+console = Console()
+_hints = []
 
 
 def show_data(metrics: dict):
