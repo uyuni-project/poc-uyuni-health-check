@@ -36,3 +36,7 @@ The loki and promtail instances are manually setup, so the tool could be run wit
 
 - Pablo Suárez Hernández - <psuarezhernandez@suse.de>
 - Cédric Bosdonnat - <cbosdonnat@suse.com>
+
+## Notes
+
+This project was started during [SUSE Hack Week 21](https://hackweek.opensuse.org/21/projects/create-tool-to-analyze-supportconfig-to-spot-common-suse-manager-issues)
