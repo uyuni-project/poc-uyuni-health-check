@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 import click
 import requests
 from rich import print
+from rich.columns import Columns
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.pretty import pprint
-from rich.columns import Columns
 from rich.table import Table
 
 
@@ -30,10 +30,16 @@ def show_data(metrics: dict):
     """
     Gather the data from the exporter and loki and display them
     """
-    print(Markdown("# Results"))
-    show_salt_jobs_summary(metrics)
-    show_salt_master_stats(metrics)
-    show_uyuni_summary(metrics)
+    console.print(Markdown("## Uyuni server and Salt Master stats"))
+    console.print()
+    if metrics:
+       tables = []
+       tables.append(show_salt_jobs_summary(metrics))
+       tables.append(show_salt_master_stats(metrics))
+       tables.append(show_uyuni_summary(metrics))
+       console.print(Columns(tables), justify="center")
+    else:
+       console.print("[yellow]Some metrics are still missing. Wait some seconds and execute again", justify="center")
 
 
 def show_error_logs_stats(loki):
