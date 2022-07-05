@@ -1,4 +1,4 @@
-# uyuni-health-check
+# uyuni-health-check <img src="https://img.shields.io/badge/EXPERIMENTAL-WIP-red" />
 
 A tool providing metrics and logs from an Uyuni server to show its health status.
 
