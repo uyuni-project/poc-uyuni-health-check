@@ -74,7 +74,7 @@ def show_error_logs_stats(loki):
     process = subprocess.run(logcli_cmd, stdout=subprocess.PIPE)
     try:
         data = json.loads(process.stdout)
-    except:
+    except Exception:
         print("[bold red]There was an error when fetching data from Loki")
         print(f"[bold red]{process.stdout.decode()}")
         return
@@ -196,11 +196,11 @@ def check_postgres_service(server):
     try:
         process = ssh_call(server, ["systemctl", "status", "postgresql"])
         if process.returncode != 0:
-            msg = f"[bold red]WARNING: 'postgresql' service is NOT running!"
+            msg = "[bold red]WARNING: 'postgresql' service is NOT running!"
             _hints.append(msg)
             console.log(msg)
         else:
-            console.log(f"[green]The postgresql service is running")
+            console.log("[green]The postgresql service is running")
     except OSError:
         raise HealthException(
             f"The specified server '{server}' is not and Uyuni / SUSE Manager server!"
@@ -214,7 +214,7 @@ def check_spacewalk_services(server, verbose=False):
     try:
         process = ssh_call(server, ["spacewalk-service", "list"])
         if process.returncode != 0:
-            raise HealthException(f"Failed to check spacewalk services")
+            raise HealthException("Failed to check spacewalk services")
 
         services = re.findall(r"(.+)\.service .*", process.stdout.decode())
         if verbose:
@@ -223,12 +223,12 @@ def check_spacewalk_services(server, verbose=False):
         for service in services:
             process = ssh_call(server, ["systemctl", "status", service])
             if process.returncode != 0:
-                msg = f"[bold red]WARNING: '{service}' service is NOT running!"
+                msg = "[bold red]WARNING: '{service}' service is NOT running!"
                 console.log(msg)
                 _hints.append(msg)
                 all_running = False
         if all_running:
-            console.log(f"[green]All spacewalk services are running")
+            console.log("[green]All spacewalk services are running")
 
     except OSError:
         raise HealthException(
@@ -479,21 +479,37 @@ def health_check(server, exporter_port, loki, logs, verbose):
         console.log("[red bold]" + str(err))
 
 
-def fetch_metrics_exporter(host="localhost", port=9000):
-    try:
-        metrics_raw = requests.get(f"http://{host}:{port}").content.decode()
-    except requests.exceptions.RequestException as exc:
-        print(
-            "[italic red]There was an error while fetching metrics from uyuni-health-exporter[/italic red]"
-        )
-        print(f"{exc}")
-        exit(1)
+def fetch_metrics_exporter(host="localhost", port=9000, max_retries=5):
+    if not host:
+        host = "localhost"
 
-    salt_metrics = re.findall(r'salt_jobs{fun="(.+)",name="(.+)"} (.+)', metrics_raw)
-    uyuni_metrics = re.findall(r'uyuni_summary{name="(.+)"} (.+)', metrics_raw)
-    salt_master_metrics = re.findall(
-        r'salt_master_stats{name="(.+)"} (.+)', metrics_raw
-    )
+    for i in range(max_retries):
+        try:
+            metrics_raw = requests.get(f"http://{host}:{port}").content.decode()
+            salt_metrics = re.findall(
+                r'salt_jobs{fun="(.+)",name="(.+)"} (.+)', metrics_raw
+            )
+            uyuni_metrics = re.findall(r'uyuni_summary{name="(.+)"} (.+)', metrics_raw)
+            salt_master_metrics = re.findall(
+                r'salt_master_stats{name="(.+)"} (.+)', metrics_raw
+            )
+            break
+        except requests.exceptions.RequestException as exc:
+            if i < max_retries - 1:
+                time.sleep(1)
+                console.log("[italic]retrying...")
+            else:
+                console.log(
+                    "[italic red]There was an error while fetching metrics from uyuni-health-exporter[/italic red]"
+                )
+                print(f"{exc}")
+                exit(1)
+
+    if not salt_metrics or not uyuni_metrics or not salt_master_metrics:
+        console.log(
+            "[yellow]Some metrics are still missing. Wait some seconds and execute again"
+        )
+        return {}
 
     metrics = {
         "salt_jobs": {},
