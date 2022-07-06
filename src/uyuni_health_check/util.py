@@ -1,5 +1,7 @@
 import subprocess
 
+from rich.text import Text
+
 
 class HealthException(Exception):
     def __init__(self, message):
@@ -30,7 +32,7 @@ def ssh_call(server, cmd, console=None):
             line = process.stdout.readline()
             if not line:
                 break
-            console.print(line.strip())
+            console.print(Text.from_ansi(line.strip()))
     returncode = process.wait()
     if returncode == 127:
         raise OSError(f"Command not found: {cmd[0]}")

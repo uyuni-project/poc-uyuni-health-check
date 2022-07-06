@@ -152,7 +152,8 @@ def show_full_error_logs(loki):
             f"--from={from_time}Z",
             "--limit=100",
             '{job=~".+"} |~ `(?i)error`',
-        ]
+        ],
+        console=console,
     )
 
 
@@ -200,7 +201,9 @@ def build_image(name, image_path=None, verbose=False):
     Build a container image
     """
     expanded_path = os.path.join(os.path.dirname(__file__), image_path or name)
-    process = podman(["build", "-t", name, expanded_path], console=console if verbose else None)
+    process = podman(
+        ["build", "-t", name, expanded_path], console=console if verbose else None
+    )
     if process.returncode != 0:
         raise HealthException(f"Failed to build {name} image")
 
@@ -278,16 +281,13 @@ def container_is_running(name, server=None):
     """
     Check if a container with a given name is running in podman
     """
-    process = podman(
-        ["ps", "--quiet", "-f", f"name={name}"],
-        server=server
-    )
+    process = podman(["ps", "--quiet", "-f", f"name={name}"], server=server)
     return process.stdout.read() != ""
 
 
 def build_loki_image(image, verbose=False):
     if image_exists(image):
-        print(f"[yellow]Skipped as the {image} image is already present")
+        console.log(f"[yellow]Skipped as the {image} image is already present")
         return
 
     # Fetch the logcli binary from the latest release
@@ -313,13 +313,13 @@ def transfer_image(server, image):
         # podman doesn't like if the image is already present
         os.unlink(local_image_path)
 
-    print(f"Saving the {image} image...")
+    console.log(f"[bold]Saving the {image} image...")
     podman(["save", "--output", local_image_path, image])
 
-    print(f"Transfering the {image} image to {server}...")
+    console.log(f"[bold]Transfering the {image} image to {server}...")
     subprocess.run(["scp", "-q", local_image_path, f"{server}:/tmp/"])
 
-    print(f"Loading the {image} image on {server}...")
+    console.log(f"[bold]Loading the {image} image on {server}...")
     podman(["load", "--input", f"/tmp/{image}.tar"], server)
 
 
@@ -391,10 +391,8 @@ def run_loki(server):
 
     :param server: the Uyuni server to deploy the exporter on or localhost
     """
-    console.log("[grey35]Not implemented yet!")
-
     if pod_exists("uyuni-health-check", server=server):
-        print("Skipped as the uyuni-health-check pod is already running")
+        console.log("[yellow]Skipped as the uyuni-health-check pod is already running")
     else:
         podman(
             [
@@ -445,7 +443,7 @@ def run_loki(server):
                 )
 
         # Run promtail only now since it pushes data to loki
-        print(Markdown("- Building promtail image"))
+        console.log("[bold]Building promtail image")
         build_loki_image("promtail")
         if server:
             transfer_image(server, "promtail")
@@ -543,7 +541,7 @@ def health_check(server, exporter_port, loki, logs, verbose):
         console.log("[bold]Checking postgresql service")
         check_postgres_service(server)
 
-        print(Markdown("- Waiting for loki to be ready"))
+        console.log("[bold]Waiting for loki to be ready")
         host = server or "localhost"
         wait_loki_init(host)
 
