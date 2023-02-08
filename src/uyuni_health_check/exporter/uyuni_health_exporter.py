@@ -1,4 +1,3 @@
-import gc
 import os
 import signal
 import sys
@@ -140,7 +139,6 @@ class UyuniDataGathererTasks(object):
         self.master_test_ping = self.test_ping()
         self.zeromq_alived_minions = self.salt_alived_minions()
         sys.stdout.flush()
-        gc.collect()
 
     def get_data(self):
         return {
@@ -249,7 +247,6 @@ def main():
         # period between collection
         time.sleep(frequency)
         uyuni_data_gatherer.refresh()
-        gc.collect()
 
 
 if __name__ == "__main__":
