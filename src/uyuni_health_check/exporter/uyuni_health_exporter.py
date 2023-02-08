@@ -14,10 +14,12 @@ import tracemalloc
 
 
 def sigterm_handler(signal, frame):
-    print('Detected SIGTERM. Exiting.')
+    print("Detected SIGTERM. Exiting.")
     sys.exit(0)
 
+
 signal.signal(signal.SIGTERM, sigterm_handler)
+
 
 def runner_process(queue):
     gatherer = UyuniDataGathererTasks()
@@ -35,7 +37,7 @@ class UyuniDataGatherer(object):
 
     def refresh(self):
         q = Queue()
-        process = Process(target=runner_process, args=(q, ))
+        process = Process(target=runner_process, args=(q,))
         process.start()
         process.join()
         self.data = q.get()
@@ -48,6 +50,7 @@ class UyuniDataGathererTasks(object):
 
     def _init_runner(self):
         import salt.runner
+
         self.master_opts = salt.config.master_config("/etc/salt/master")
         self.master_opts["quiet"] = True
         self.runner = salt.runner.RunnerClient(self.master_opts)
@@ -100,9 +103,12 @@ class UyuniDataGathererTasks(object):
         }
         for jid in jobs:
             if jobs[jid]["Function"] == "state.apply" and jobs[jid]["Arguments"]:
-                if isinstance(jobs[jid]["Arguments"][0], dict) and jobs[jid]["Arguments"][0].get("mods"):
+                if isinstance(jobs[jid]["Arguments"][0], dict) and jobs[jid][
+                    "Arguments"
+                ][0].get("mods"):
                     tag = "{}_{}".format(
-                        jobs[jid]["Function"], "_".join(jobs[jid]["Arguments"][0]["mods"])
+                        jobs[jid]["Function"],
+                        "_".join(jobs[jid]["Arguments"][0]["mods"]),
                     )
                 else:
                     tag = "{}_{}".format(
@@ -249,10 +255,11 @@ def main():
         uyuni_data_gatherer.refresh()
         gc.collect()
         snapshot2 = tracemalloc.take_snapshot()
-        top_stats = snapshot2.compare_to(snapshot, 'lineno')
+        top_stats = snapshot2.compare_to(snapshot, "lineno")
         print("[ Top 10 differences ]")
         for stat in top_stats[:10]:
             print(stat)
+
 
 if __name__ == "__main__":
     main()
