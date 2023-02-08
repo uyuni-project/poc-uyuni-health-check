@@ -1,21 +1,54 @@
 import os
 import sys
 import time
+import signal
+import yaml
+import gc
+from multiprocessing import Process, Queue
 
 import salt.config
-import salt.runner
-import yaml
 from prometheus_client import start_http_server
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
 
+import tracemalloc
+
+
+def sigterm_handler(signal, frame):
+    print('Detected SIGTERM. Exiting.')
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, sigterm_handler)
+
+def runner_process(queue):
+    gatherer = UyuniDataGathererTasks()
+    gatherer.refresh()
+    queue.put(gatherer.get_data())
+
 
 class UyuniDataGatherer(object):
+    def __init__(self):
+        self.data = {}
+        self.refresh()
+
+    def __getattr__(self, item):
+        return self.data[item]
+
+    def refresh(self):
+        q = Queue()
+        process = Process(target=runner_process, args=(q, ))
+        process.start()
+        process.join()
+        self.data = q.get()
+
+
+class UyuniDataGathererTasks(object):
     def __init__(self):
         self._init_runner()
         self.refresh()
 
     def _init_runner(self):
-        self.master_opts = salt.config.client_config("/etc/salt/master")
+        import salt.runner
+        self.master_opts = salt.config.master_config("/etc/salt/master")
         self.master_opts["quiet"] = True
         self.runner = salt.runner.RunnerClient(self.master_opts)
 
@@ -66,12 +99,15 @@ class UyuniDataGatherer(object):
             "functions": {},
         }
         for jid in jobs:
-            if jobs[jid]["Function"] == "state.apply" and jobs[jid]["Arguments"][0].get(
-                "mods"
-            ):
-                tag = "{}_{}".format(
-                    jobs[jid]["Function"], "_".join(jobs[jid]["Arguments"][0]["mods"])
-                )
+            if jobs[jid]["Function"] == "state.apply" and jobs[jid]["Arguments"]:
+                if isinstance(jobs[jid]["Arguments"][0], dict) and jobs[jid]["Arguments"][0].get("mods"):
+                    tag = "{}_{}".format(
+                        jobs[jid]["Function"], "_".join(jobs[jid]["Arguments"][0]["mods"])
+                    )
+                else:
+                    tag = "{}_{}".format(
+                        jobs[jid]["Function"], jobs[jid]["Arguments"][0]
+                    )
             else:
                 tag = jobs[jid]["Function"]
             summary["functions"].setdefault(tag, 0)
@@ -100,6 +136,23 @@ class UyuniDataGatherer(object):
         self.master_test_ping = self.test_ping()
         self.zeromq_alived_minions = self.salt_alived_minions()
         sys.stdout.flush()
+        gc.collect()
+
+    def get_data(self):
+        return {
+            "channels": self.channels,
+            "packages": self.packages,
+            "systems": self.systems,
+            "actions": self.actions,
+            "actions_pending": self.actions_pending,
+            "actions_last_day": self.actions_last_day,
+            "failed_actions_last_day": self.failed_actions_last_day,
+            "completed_actions_last_day": self.completed_actions_last_day,
+            "salt_jobs": self.salt_jobs,
+            "active_salt_jobs": self.active_salt_jobs,
+            "master_test_ping": self.master_test_ping,
+            "zeromq_alived_minions": self.zeromq_alived_minions,
+        }
 
 
 class UyuniMetricsCollector(object):
@@ -173,7 +226,7 @@ class UyuniMetricsCollector(object):
         yield gauge3
 
 
-if __name__ == "__main__":
+def main():
     port = 9000
     frequency = 60
     if os.path.exists("config.yml"):
@@ -186,9 +239,20 @@ if __name__ == "__main__":
                 print(error)
 
     start_http_server(port)
+    tracemalloc.start()
+    snapshot = tracemalloc.take_snapshot()
     uyuni_data_gatherer = UyuniDataGatherer()
     REGISTRY.register(UyuniMetricsCollector(uyuni_data_gatherer))
     while True:
         # period between collection
         time.sleep(frequency)
         uyuni_data_gatherer.refresh()
+        gc.collect()
+        snapshot2 = tracemalloc.take_snapshot()
+        top_stats = snapshot2.compare_to(snapshot, 'lineno')
+        print("[ Top 10 differences ]")
+        for stat in top_stats[:10]:
+            print(stat)
+
+if __name__ == "__main__":
+    main()
