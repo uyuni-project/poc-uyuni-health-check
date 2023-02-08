@@ -1,16 +1,15 @@
+import gc
 import os
+import signal
 import sys
 import time
-import signal
-import yaml
-import gc
+import tracemalloc
 from multiprocessing import Process, Queue
 
 import salt.config
+import yaml
 from prometheus_client import start_http_server
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
-
-import tracemalloc
 
 
 def sigterm_handler(signal, frame):
