@@ -3,7 +3,6 @@ import os
 import signal
 import sys
 import time
-import tracemalloc
 from multiprocessing import Process, Queue
 
 import salt.config
@@ -244,8 +243,6 @@ def main():
                 print(error)
 
     start_http_server(port)
-    tracemalloc.start()
-    snapshot = tracemalloc.take_snapshot()
     uyuni_data_gatherer = UyuniDataGatherer()
     REGISTRY.register(UyuniMetricsCollector(uyuni_data_gatherer))
     while True:
@@ -253,11 +250,6 @@ def main():
         time.sleep(frequency)
         uyuni_data_gatherer.refresh()
         gc.collect()
-        snapshot2 = tracemalloc.take_snapshot()
-        top_stats = snapshot2.compare_to(snapshot, "lineno")
-        print("[ Top 10 differences ]")
-        for stat in top_stats[:10]:
-            print(stat)
 
 
 if __name__ == "__main__":
