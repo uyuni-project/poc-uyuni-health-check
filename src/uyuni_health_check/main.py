@@ -98,12 +98,14 @@ def show_error_logs_stats(loki):
     """
     Get and show the error logs stats
     """
-    loki_url = loki or "http://localhost:3100"
+    loki_url = loki or "http://loki:3100"
     process = podman(
         [
             "run",
             "-ti",
             "--rm",
+            "--pod",
+            "uyuni-health-check",
             "--name",
             "logcli",
             "logcli",
@@ -135,14 +137,15 @@ def show_full_error_logs(loki):
     """
     Get and show the error logs
     """
-    loki_url = loki or "http://localhost:3100"
+    loki_url = loki or "http://loki:3100"
     from_time = (datetime.utcnow() - timedelta(days=7)).isoformat()
     print(Markdown("- Error logs of the last 7 days"))
     podman(
         [
             "run",
             "-ti",
-            "--rm",
+            "--pod",
+            "uyuni-health-check",
             "--name",
             "logcli",
             "logcli",
@@ -196,13 +199,15 @@ def show_uyuni_summary(metrics: dict):
     return table
 
 
-def build_image(name, image_path=None, verbose=False):
+def build_image(name, image_path=None, verbose=False, server=None):
     """
     Build a container image
     """
     expanded_path = os.path.join(os.path.dirname(__file__), image_path or name)
     process = podman(
-        ["build", "-t", name, expanded_path], console=console if verbose else None
+        ["build", "-t", name, expanded_path],
+        console=console if verbose else None,
+        server=server,
     )
     if process.returncode != 0:
         raise HealthException(f"Failed to build {name} image")
@@ -220,12 +225,14 @@ def pod_exists(pod, server=None):
     )
 
 
-def image_exists(image):
+def image_exists(image, server=None):
     """
     Check if the image is present in podman images result
     """
     return (
-        podman(["images", "--quiet", "-f", f"reference={image}"]).stdout.read().strip()
+        podman(["images", "--quiet", "-f", f"reference={image}"], server=server)
+        .stdout.read()
+        .strip()
         != ""
     )
 
@@ -285,8 +292,8 @@ def container_is_running(name, server=None):
     return process.stdout.read() != ""
 
 
-def build_loki_image(image, verbose=False):
-    if image_exists(image):
+def build_loki_image(image, verbose=False, server=None):
+    if image_exists(image, server=server):
         console.log(f"[yellow]Skipped as the {image} image is already present")
         return
 
@@ -296,7 +303,7 @@ def build_loki_image(image, verbose=False):
     response = requests.get(url)
     zip = zipfile.ZipFile(io.BytesIO(response.content))
     zip.extract(f"{image}-linux-amd64", dest_dir)
-    build_image(image, verbose=verbose)
+    build_image(image, verbose=verbose, server=server)
     console.log(f"[green]The {image} image was built successfully")
 
 
@@ -368,10 +375,11 @@ def prepare_exporter(server, verbose=False):
     podman(
         [
             "run",
+            "--pod",
+            "uyuni-health-check",
             "-u",
             f"{salt_uid}:{salt_gid}",
             "-d",
-            "--rm",
             "--network=host",
             "-v",
             "/etc/salt:/etc/salt:ro",
@@ -382,14 +390,104 @@ def prepare_exporter(server, verbose=False):
             "uyuni-health-exporter",
         ],
         server,
+        console=console,
     )
 
 
-def run_loki(server):
-    """
-    Run promtail and loki to aggregate the logs
+def prepare_grafana(server, verbose=False):
+    if container_is_running("uyuni-health-check-grafana", server=server):
+        console.log(
+            "[yellow]Skipped as the uyuni-health-check-grafana container is already running"
+        )
+    else:
+        # Copy the grafana config
+        grafana_cfg = os.path.join(os.path.dirname(__file__), "grafana")
 
-    :param server: the Uyuni server to deploy the exporter on or localhost
+        if server:
+            try:
+                subprocess.run(
+                    ["scp", "-rq", grafana_cfg, f"{server}:/tmp/"], check=True
+                )
+                grafana_cfg = "/tmp/grafana"
+            except Exception:
+                raise HealthException(
+                    f"Failed to copy grafana configuration to {server}"
+                )
+
+        # Run the container
+        podman(
+            [
+                "run",
+                "--pod",
+                "uyuni-health-check",
+                "-d",
+                "-v",
+                f"{grafana_cfg}/datasources.yaml:/etc/grafana/provisioning/datasources/ds.yaml",
+                "-v",
+                f"{grafana_cfg}/dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml",
+                "-v",
+                f"{grafana_cfg}/dashboards:/var/lib/grafana/dashboards",
+                "-e",
+                "GF_PATHS_PROVISIONING=/etc/grafana/provisioning",
+                "-e",
+                "GF_AUTH_ANONYMOUS_ENABLED=true",
+                "-e",
+                "GF_AUTH_ANONYMOUS_ORG_ROLE=Admin",
+                "--name",
+                "uyuni-health-check-grafana",
+                "docker.io/grafana/grafana:9.2.1",
+                "run.sh",
+            ],
+            server,
+            console=console,
+        )
+
+
+def prepare_prometheus(server, verbose=False):
+    if container_is_running("uyuni-health-check-prometheus", server=server):
+        console.log(
+            "[yellow]Skipped as the uyuni-health-check-prometheus container is already running"
+        )
+    else:
+        # Copy the prometheus config
+        prometheus_cfg = os.path.join(
+            os.path.dirname(__file__), "prometheus", "prometheus.yml"
+        )
+
+        if server:
+            try:
+                subprocess.run(
+                    ["scp", "-rq", prometheus_cfg, f"{server}:/tmp/"], check=True
+                )
+                prometheus_cfg = "/tmp/prometheus.yml"
+            except Exception:
+                raise HealthException(
+                    f"Failed to copy prometheus configuration to {server}"
+                )
+
+        # Run the container
+        podman(
+            [
+                "run",
+                "--pod",
+                "uyuni-health-check",
+                "-d",
+                "-v",
+                f"{prometheus_cfg}:/etc/prometheus/prometheus.yml",
+                "--name",
+                "uyuni-health-check-prometheus",
+                "docker.io/prom/prometheus",
+            ],
+            server,
+            console=console,
+        )
+
+
+def create_pod(server):
+    """
+    Create uyuni-health-check pod where we run the containers
+
+    :param server: the Uyuni server to create the pod on or localhost
     """
     if pod_exists("uyuni-health-check", server=server):
         console.log("[yellow]Skipped as the uyuni-health-check pod is already running")
@@ -402,13 +500,28 @@ def run_loki(server):
                 "3100:3100",
                 "-p",
                 "9081:9081",
+                "-p",
+                "3000:3000",
+                "-p",
+                "9090:9090",
                 "--replace",
                 "-n",
                 "uyuni-health-check",
             ],
-            server,
+            server=server,
             console=console,
         )
+
+
+def run_loki(server):
+    """
+    Run promtail and loki to aggregate the logs
+
+    :param server: the Uyuni server to deploy the exporter on or localhost
+    """
+    if container_is_running("loki", server=server):
+        console.log("[yellow]Skipped as the loki container is already running")
+    else:
 
         # TODO Prepare config to tune the oldest message allowed
         podman(
@@ -416,7 +529,6 @@ def run_loki(server):
                 "run",
                 "--pod",
                 "uyuni-health-check",
-                "--rm",
                 "--replace",
                 "-d",
                 "--name",
@@ -452,7 +564,6 @@ def run_loki(server):
                 "run",
                 "--replace",
                 "-d",
-                "--rm",
                 "-v",
                 f"{promtail_cfg}:/etc/promtail/config.yml",
                 "-v",
@@ -474,10 +585,122 @@ def clean_server(server):
 
     :param server: server to clean
     """
-    console.log("[grey35]Not implemented yet!")
+    with console.status(status=None):
+        console.log("[bold]Cleaning up containers after execution")
+        if not pod_exists("uyuni-health-check", server=server):
+            console.log("[yellow]Skipped as the uyuni-health-check pod is not running")
+        else:
+            podman(
+                [
+                    "pod",
+                    "rm",
+                    "-f",
+                    "uyuni-health-check",
+                ],
+                server,
+                console=console,
+            )
+            console.log("[green]Containers have been removed")
 
 
-@click.command()
+@click.group()
+@click.option(
+    "-s",
+    "--server",
+    default=None,
+    help="Uyuni Server to connect to if not running directly on the server",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Show more stdout, including image building",
+)
+@click.pass_context
+def cli(ctx, server, verbose):
+    # ensure that ctx.obj exists and is a dict (in case `cli()` is called
+    # by means other than the `if` block below)
+    ctx.ensure_object(dict)
+    ctx.obj["server"] = server
+    ctx.obj["verbose"] = server
+
+    try:
+        console.log("[bold]Checking connection with podman:")
+        ssh_call(server, ["podman", "--version"], console=console, quiet=False)
+    except HealthException as err:
+        console.log("[red bold]" + str(err))
+        console.print(Markdown("# Execution Finished"))
+        exit(1)
+
+
+@cli.command()
+@click.pass_context
+def clean(ctx):
+    """
+    Remove all the containers we spawned on the server
+
+    :param server: server where containers are running
+    """
+    server = ctx.obj["server"]
+    clean_server(server)
+    console.print(Markdown("# Execution Finished"))
+
+
+@cli.command()
+@click.pass_context
+def stop(ctx):
+    """
+    Stop the containers on the server if already present
+
+    :param server: server where containers are running
+    """
+    server = ctx.obj["server"]
+    with console.status(status=None):
+        console.log("[bold]Stopping uyuni-health-check containers")
+        if not pod_exists("uyuni-health-check", server=server):
+            console.log("[yellow]Skipped as the uyuni-health-check pod does not exist")
+        else:
+            podman(
+                [
+                    "pod",
+                    "stop",
+                    "uyuni-health-check",
+                ],
+                server,
+                console=console,
+            )
+            console.log("[green]Containers have been stopped")
+    console.print(Markdown("# Execution Finished"))
+
+
+@cli.command()
+@click.pass_context
+def start(ctx):
+    """
+    Start the containers on the server if already present
+
+    :param server: server where to start the containers
+    """
+    server = ctx.obj["server"]
+    with console.status(status=None):
+        console.log("[bold]Starting uyuni-health-check containers")
+        if not pod_exists("uyuni-health-check", server=server):
+            console.log("[yellow]Skipped as the uyuni-health-check pod does not exist")
+        else:
+            podman(
+                [
+                    "pod",
+                    "start",
+                    "uyuni-health-check",
+                ],
+                server,
+                console=console,
+            )
+            console.log("[green]Containers have been started")
+    console.print(Markdown("# Execution Finished"))
+
+
+@cli.command()
 @click.option(
     "-ep",
     "--exporter-port",
@@ -491,59 +714,67 @@ def clean_server(server):
     help="URL of an existing loki instance to use to fetch the logs",
 )
 @click.option(
-    "-s",
-    "--server",
-    default=None,
-    help="Uyuni Server to connect to if not running directly on the server",
-)
-@click.option(
     "--logs",
     is_flag=True,
     help="Show the error logs",
 )
 @click.option(
-    "-v",
-    "--verbose",
+    "-c",
+    "--clean",
     is_flag=True,
-    help="Show more stdout, including image building",
+    help="Remove containers after execution",
 )
-def health_check(server, exporter_port, loki, logs, verbose):
+@click.pass_context
+def run(ctx, exporter_port, loki, logs, clean):
     """
+    Start execution of Uyuni Health Check
+
     Build the necessary containers, deploy them, get the metrics and display them
 
     :param server: the server to connect to
     :param exporter_port: uyuni health exporter metrics port
     :param loki: URL to a loki instance. Setting it will skip the promtail and loki deployments
     """
+    server = ctx.obj["server"]
+    verbose = ctx.obj["verbose"]
     try:
         with console.status(status=None):
+            console.log("[bold]Creating POD for containers")
+            create_pod(server)
+
+            console.log("[bold]Building logcli image")
+            build_loki_image("logcli", server=server)
+
+            console.log("[bold]Deploying promtail and Loki")
+            if not loki:
+                run_loki(server)
+            else:
+                console.log(f"[yellow]Skipped to use Loki at {loki}")
+
             console.log("[bold]Preparing uyuni-health-exporter")
             prepare_exporter(server, verbose=verbose)
 
-        console.log("[bold]Building logcli image")
-        build_loki_image("logcli")
+            console.log("[bold]Preparing grafana")
+            prepare_grafana(server, verbose=verbose)
 
-        console.log("Deploying promtail and Loki")
-        if not loki:
-            run_loki(server)
-        else:
-            console.log(f"[yellow]Skipped to use Loki at {loki}")
+            console.log("[bold]Preparing prometheus")
+            prepare_prometheus(server, verbose=verbose)
 
-        # Fetch metrics from uyuni-health-exporter
-        console.log("[bold]Fetching metrics from uyuni-health-exporter")
-        metrics = fetch_metrics_exporter(server, exporter_port)
+            # Fetch metrics from uyuni-health-exporter
+            console.log("[bold]Fetching metrics from uyuni-health-exporter")
+            metrics = fetch_metrics_exporter(server, exporter_port)
 
-        # Check spacewalk services
-        console.log("[bold]Checking spacewalk services")
-        check_spacewalk_services(server, verbose=verbose)
+            # Check spacewalk services
+            console.log("[bold]Checking spacewalk services")
+            check_spacewalk_services(server, verbose=verbose)
 
-        # Check spacewalk services
-        console.log("[bold]Checking postgresql service")
-        check_postgres_service(server)
+            # Check spacewalk services
+            console.log("[bold]Checking postgresql service")
+            check_postgres_service(server)
 
-        console.log("[bold]Waiting for loki to be ready")
-        host = server or "localhost"
-        wait_loki_init(host)
+            console.log("[bold]Waiting for loki to be ready")
+            host = server or "localhost"
+            wait_loki_init(host)
 
         # Gather and show the data
         console.print(Markdown("# Results"))
@@ -557,7 +788,9 @@ def health_check(server, exporter_port, loki, logs, verbose):
     except HealthException as err:
         console.log("[red bold]" + str(err))
     finally:
-        clean_server(server)
+        if clean:
+            clean_server(server)
+    console.print(Markdown("# Execution Finished"))
 
 
 def fetch_metrics_exporter(host="localhost", port=9000, max_retries=5):
@@ -611,6 +844,10 @@ def fetch_metrics_exporter(host="localhost", port=9000, max_retries=5):
     return metrics
 
 
-if __name__ == "__main__":
+def main():
     print(Markdown("# Uyuni Health Check"))
-    health_check()
+    cli()
+
+
+if __name__ == "__main__":
+    main()
