@@ -65,7 +65,7 @@ It will create a POD where the following containers will run:
 
 After the metrics are collected and displayed in the CLI, the containers will keep running and collecting more metrics that will be stored on the running containers.
 
-The tool is providing an provisioned grafana instance with a dashboard that exposes the metrics.
+The tool is providing a provisioned grafana instance with a dashboard that exposes the metrics.
 
 This is a summary of exposed ports:
 
