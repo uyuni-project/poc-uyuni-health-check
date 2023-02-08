@@ -22,7 +22,7 @@ homepage = "https://github.com/meaksh/uyuni-health-check"
 tracker =  "https://github.com/meaksh/uyuni-health-check/issues"
 
 [project.scripts]
-uyuni-health-check = "uyuni_health_check.main:run"
+uyuni-health-check = "uyuni_health_check.main:main"
 
 [tool.isort]
 multi_line_output = 3

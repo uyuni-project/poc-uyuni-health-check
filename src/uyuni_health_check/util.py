@@ -8,7 +8,7 @@ class HealthException(Exception):
         super().__init__(message)
 
 
-def ssh_call(server, cmd, console=None):
+def ssh_call(server, cmd, console=None, quiet=True):
     """
     Run a command over SSH.
 
@@ -17,8 +17,10 @@ def ssh_call(server, cmd, console=None):
     For now the function assumes passwordless connection to the server on default SSH port.
     Use SSH agent and config to adjust if needed.
     """
-    if server:
+    if server and quiet:
         ssh_cmd = ["ssh", "-q", server] + cmd
+    elif server:
+        ssh_cmd = ["ssh", server] + cmd
     else:
         ssh_cmd = cmd
     process = subprocess.Popen(
@@ -29,13 +31,15 @@ def ssh_call(server, cmd, console=None):
     )
     if console:
         while True:
-            line = process.stdout.readline()
+            line = process.stdout.readline() or process.stderr.readline()
             if not line:
                 break
-            console.print(Text.from_ansi(line.strip()))
+            console.log(Text.from_ansi(line.strip()))
     returncode = process.wait()
     if returncode == 127:
         raise OSError(f"Command not found: {cmd[0]}")
+    elif returncode == 255:
+        raise HealthException(f"There has been an error running: {cmd}")
     return process
 
 

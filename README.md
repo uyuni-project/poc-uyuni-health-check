@@ -1,26 +1,90 @@
 # uyuni-health-check <img src="https://img.shields.io/badge/EXPERIMENTAL-WIP-red" />
 
-A tool providing metrics and logs from an Uyuni server to show its health status.
+A tool providing dashboard, metrics and logs from an Uyuni server to show its health status.
 
 ## Requirements
 
-* `podman`
-* Python 3
+* `python3`
+* `python3-pip`
+* `python3-virtualenv` (optional)
 
-## Building
+NOTE: `podman` is required on the Uyuni server where we want to get its health status.
 
-    python3 -m build
+## Building and installing
+
+### In the local system
+
+    # pip3 install .
+
+### Using a virtualenv
+
+    # virtualenv venv
+    # . venv/bin/activate
+    # pip3 install .
 
 ##  Running
 
-For now the tool only deploy the prometheus exporter and builds the logcli container image.
-The loki and promtail instances are manually setup, so the tool could be run with a similar command:
+    # uyuni-health-check --help
+    ╔═════════════════════════════════════════════════════════════════════════════════╗
+    ║                               Uyuni Health Check                                ║
+    ╚═════════════════════════════════════════════════════════════════════════════════╝
+    Usage: uyuni-health-check [OPTIONS] COMMAND [ARGS]...
+    
+    Options:
+      -s, --server TEXT  Uyuni Server to connect to if not running directly on the
+                         server
+      -v, --verbose      Show more stdout, including image building
+      --help             Show this message and exit.
+    
+    Commands:
+      clean  Remove all the containers we spawned on the server
+      run    Start execution of Uyuni Health Check
+      start  Start the containers on the server if already present
+      stop   Stop the containers on the server if already present
 
-    python3 src/uyuni_health_check/main.py --loki 'http://demo-grafana.mgr.lab:3100' --server demo-srv.mgr.lab
+## Getting started
+
+This tool takes care of building and deploying the necessary containers to scrape some metrics and logs from an Uyuni server. The "podman" CLI is required on the Uyuni server where we want to get the metrics and logs.
+
+### You can run this tool directly on your running Uyuni server:
+
+    uyuni-health-check run
+
+### Or alternatively accessing Uyuni server via SSH:
+
+    uyuni-health-check -s my_uyuni_server.fqdn run
+
+It will create a POD where the following containers will run:
+
+- uyuni-health-exporter
+- grafana
+- prometheus
+- loki
+- promtail
+- logcli
+
+After the metrics are collected and displayed in the CLI, the containers will keep running and collecting more metrics that will be stored on the running containers.
+
+The tool is providing a provisioned grafana instance with a dashboard that exposes the metrics.
+
+This is a summary of exposed ports:
+
+- 3000 -> grafana UI
+- 9000 -> metrics from `uyuni-health-exporter`
+- 9100 -> loki API
+- 9090 -> prometheus
+- 9081 -> promtail
+
+You can stop the containers with:
+
+    uyuni-health-check stop
+
+To clean and remove all containers:
+
+    uyuni-health-check clean
 
 ## TODO
 
-* Deploy promtail and loki using containers if not using `--loki`
 * Cleaner and more compact final view of the data
 * Gather more data like:
   * the state of the systemd services
@@ -31,6 +95,14 @@ The loki and promtail instances are manually setup, so the tool could be run wit
   * Parse and unify the log levels in promtail
     The issue here is that `Critical` is showing in some log messages as parts of class names and probably we are missing some log entries due to slightly different wordings.
 * Allow running based on an archive of extracted logs (supportconfig?)
+
+## Changelog
+
+* Deploy Loki, prometheus and grafana containers and dashboard.
+* Enhance `uyuni-health-check` CLI - new commands added.
+* Fix problems building Python package.
+* Fix memory leak on uyuni-health-exporter container.
+* Run all containers using same POD.
 
 ## Authors
 
