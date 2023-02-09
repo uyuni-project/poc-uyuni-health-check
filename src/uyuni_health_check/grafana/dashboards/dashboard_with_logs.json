@@ -1008,7 +1008,7 @@
             "uid": "H9O3Mj3nk"
           },
           "editorMode": "code",
-          "expr": "{job=~\".+\"} |~ `(?i) (ERROR|CRITICAL|SEVERE) `",
+          "expr": "{job=~\".+\"} |~ `(ERROR|CRITICAL|SEVERE) `",
           "queryType": "range",
           "refId": "A"
         }
