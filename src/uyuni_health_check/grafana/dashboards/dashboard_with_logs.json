@@ -920,7 +920,7 @@
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "always",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -973,7 +973,7 @@
             "uid": "H9O3Mj3nk"
           },
           "editorMode": "code",
-          "expr": " sum by (job) (count_over_time({job=~\".+\"} |= `ERROR` [$__interval]))",
+          "expr": " sum by (job) (count_over_time({job=~\".+\"} |~ `(ERROR|CRITICAL|SEVERE|error)` [$__interval]))",
           "legendFormat": "{{job}}",
           "queryType": "range",
           "refId": "A"
@@ -1008,7 +1008,7 @@
             "uid": "H9O3Mj3nk"
           },
           "editorMode": "code",
-          "expr": "{job=~\".+\"} |~ `(ERROR|CRITICAL|SEVERE) `",
+          "expr": "{job=~\".+\"} |~ `(ERROR|CRITICAL|SEVERE|error)`",
           "queryType": "range",
           "refId": "A"
         }
