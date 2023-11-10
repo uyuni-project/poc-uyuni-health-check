@@ -16,20 +16,29 @@ from rich import print
 from rich.columns import Columns
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.pretty import pprint
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
-from uyuni_health_check.util import HealthException, podman, ssh_call
+from uyuni_health_check.util import (
+    HealthException,
+    podman,
+    render_promtail_cfg,
+    render_supportconfig_exporter_cfg,
+    ssh_call,
+)
 
 # Update this number if adding more targets to the promtail config
-PROMTAIL_TARGETS = 5
+PROMTAIL_TARGETS = 6
 
+# Max number of seconds to wait for Loki to be ready
+LOKI_WAIT_TIMEOUT = 120
 
 console = Console()
 _hints = []
 
 
-def show_data(metrics: dict):
+def show_uyuni_live_server_metrics(metrics: dict):
     """
     Gather the data from the exporter and loki and display them
     """
@@ -48,12 +57,29 @@ def show_data(metrics: dict):
         )
 
 
+def show_supportconfig_metrics(metrics: dict):
+    if metrics:
+        tables = []
+        tables.append(show_salt_jobs_summary(metrics))
+        tables.append(show_salt_keys_summary(metrics))
+        tables.append(show_salt_master_configuration_summary(metrics))
+        console.print(Columns(tables), justify="center")
+    else:
+        console.print(
+            "[yellow]Some metrics are still missing. Wait some seconds and execute again",
+            justify="center",
+        )
+
+
 def show_relevant_hints():
     console.print(Markdown("## Relevant hints. Please take a look!"))
     console.print()
 
     if not _hints:
-        console.print("[italic]There are no relevant hints", justify="center")
+        console.print(
+            Panel(Text("Good news! There are no relevant hints.", justify="center")),
+            style="italic green",
+        )
     else:
         for hint in _hints:
             console.print(hint, justify="center")
@@ -61,7 +87,7 @@ def show_relevant_hints():
     console.print()
 
 
-def wait_loki_init(server):
+def wait_loki_init(server, verbose=False):
     """
     Try to figure out when loki is ready to answer our requests.
     There are two things to wait for:
@@ -69,6 +95,9 @@ def wait_loki_init(server):
       - promtail to have read the logs and the loki ingester having handled them
     """
     metrics = None
+    timeouted = False
+    start_time = time.time()
+    ready = False
 
     # Wait for promtail to be ready
     # TODO Add a timeout here in case something went really bad
@@ -77,27 +106,59 @@ def wait_loki_init(server):
     while (
         not metrics
         or metrics["active"] < PROMTAIL_TARGETS
-        or not metrics["lags"]
+        or (not metrics["lags"] and metrics["active_files"] == 0)
         or any([v >= 10 for v in metrics["lags"].values()])
+        or (metrics["lags"] and metrics["active_files"])
+        or not ready
+        and not timeouted
     ):
         sleep(1)
         response = requests.get(f"http://{server}:9081/metrics")
         if response.status_code == 200:
             content = response.content.decode()
             active = re.findall("promtail_targets_active_total ([0-9]+)", content)
+            active_files = re.findall("promtail_files_active_total ([0-9]+)", content)
             lags = re.findall(
                 'promtail_stream_lag_seconds{filename="([^"]+)".*} ([0-9.]+)', content
             )
             metrics = {
                 "lags": {row[0]: float(row[1]) for row in lags},
                 "active": int(active[0]) if active else 0,
+                "active_files": int(active_files[0]) if active_files else 0,
             }
 
+        # check if loki is ready
+        response = requests.get(f"http://{server}:3100/ready")
+        if response.status_code == 200:
+            content = response.content.decode()
+            if content == "ready\n":
+                ready = True
 
-def show_error_logs_stats(loki):
+        # check if promtail is ready
+        response = requests.get(f"http://{server}:9081/ready")
+        if response.status_code == 200:
+            content = response.content.decode()
+            if content == "Ready":
+                ready = True
+            else:
+                ready = False
+        # check timeout
+        if (time.time() - start_time) > LOKI_WAIT_TIMEOUT:
+            timeouted = True
+    if timeouted:
+        raise HealthException(
+            "[red bold]Timeout has been reached waiting for Loki and promtail. Something unexpected may happen. Please check and try again."
+        )
+    else:
+        console.log("[bold]Loki and promtail are now ready to receive requests")
+
+
+def show_error_logs_stats(loki, since):
     """
     Get and show the error logs stats
     """
+    print(Markdown(f"- Errors in logs over the last {since} days:"))
+    print()
     loki_url = loki or "http://loki:3100"
     process = podman(
         [
@@ -112,7 +173,11 @@ def show_error_logs_stats(loki):
             "--quiet",
             f"--addr={loki_url}",
             "instant-query",
-            'count_over_time({job=~".+"} |~ `(?i)error` [7d])',
+            "--limit",
+            "150",
+            'count_over_time({job=~".+"} |~ `(?i)error|(?i)severe|(?i)critical|(?i)fatal` ['
+            + str(since)
+            + "d])",
         ]
     )
     response = process.stdout.read()
@@ -121,29 +186,40 @@ def show_error_logs_stats(loki):
     except JSONDecodeError:
         raise HealthException(f"Invalid logcli response: {response}")
 
-    print(Markdown("- Errors in logs over the last 7 days"))
-    print()
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("File")
-    table.add_column("Errors")
+    if data:
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("File")
+        table.add_column("Errors")
 
-    for metric in data:
-        table.add_row(metric["metric"]["filename"], metric["value"][1])
+        for metric in data:
+            table.add_row(metric["metric"]["filename"], metric["value"][1])
 
-    print(table)
+        print(table)
+    else:
+        console.print(
+            Panel(
+                Text(
+                    f"Good news! No errors detected in logs in the last {since} days.",
+                    justify="center",
+                )
+            ),
+            style="italic green",
+        )
 
 
-def show_full_error_logs(loki):
+def show_full_error_logs(loki, since):
     """
     Get and show the error logs
     """
+    print()
+    print(Markdown(f"- Error logs of the last {since} days:"))
+    from_time = (datetime.utcnow() - timedelta(days=since)).isoformat()
     loki_url = loki or "http://loki:3100"
-    from_time = (datetime.utcnow() - timedelta(days=7)).isoformat()
-    print(Markdown("- Error logs of the last 7 days"))
     podman(
         [
             "run",
             "-ti",
+            "--rm",
             "--pod",
             "uyuni-health-check",
             "--name",
@@ -153,11 +229,12 @@ def show_full_error_logs(loki):
             f"--addr={loki_url}",
             "query",
             f"--from={from_time}Z",
-            "--limit=100",
-            '{job=~".+"} |~ `(?i)error`',
+            "--limit=150",
+            '{job=~".+"} |~ `(?i)error|(?i)severe|(?i)critical|(?i)fatal`',
         ],
         console=console,
     )
+    print()
 
 
 def show_salt_jobs_summary(metrics: dict):
@@ -167,6 +244,32 @@ def show_salt_jobs_summary(metrics: dict):
 
     for metric, value in sorted(
         metrics["salt_jobs"].items(), reverse=True, key=lambda item: item[1]
+    ):
+        table.add_row(metric, str(int(value)))
+
+    return table
+
+
+def show_salt_keys_summary(metrics: dict):
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Salt keys")
+    table.add_column("Total")
+
+    for metric, value in sorted(
+        metrics["salt_keys"].items(), reverse=True, key=lambda item: item[1]
+    ):
+        table.add_row(metric, str(int(value)))
+
+    return table
+
+
+def show_salt_master_configuration_summary(metrics: dict):
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Salt Master Configuration")
+    table.add_column("Value")
+
+    for metric, value in sorted(
+        metrics["salt_master_config"].items(), reverse=True, key=lambda item: item[1]
     ):
         table.add_row(metric, str(int(value)))
 
@@ -298,7 +401,8 @@ def build_loki_image(image, verbose=False, server=None):
         return
 
     # Fetch the logcli binary from the latest release
-    url = f"https://github.com/grafana/loki/releases/download/v2.5.0/{image}-linux-amd64.zip"
+    url = f"https://github.com/grafana/loki/releases/download/v2.9.2/{image}-linux-amd64.zip"
+    #    url = f"https://github.com/grafana/loki/releases/download/v2.8.6/{image}-linux-amd64.zip"
     dest_dir = os.path.join(os.path.dirname(__file__), image)
     response = requests.get(url)
     zip = zipfile.ZipFile(io.BytesIO(response.content))
@@ -330,65 +434,93 @@ def transfer_image(server, image):
     podman(["load", "--input", f"/tmp/{image}.tar"], server)
 
 
-def prepare_exporter(server, verbose=False):
+def prepare_exporter(server, verbose=False, supportconfig_path=None):
     """
     Build the prometheus exporter image and deploy it on the server
 
     :param server: the Uyuni server to deploy the exporter on
     """
-    console.log("[bold]Building uyuni-health-exporter image")
-    if image_exists("uyuni-health-exporter"):
-        console.log(
-            "[yellow]Skipped as the uyuni-health-exporter image is already present"
-        )
+    if supportconfig_path:
+        exporter_name = "supportconfig-exporter"
+        exporter_dir = "supportconfig_exporter"
+        render_supportconfig_exporter_cfg(supportconfig_path)
     else:
-        build_image("uyuni-health-exporter", "exporter", verbose=verbose)
-        console.log("[green]The uyuni-health-exporter image was built successfully")
+        exporter_name = "uyuni-health-exporter"
+        exporter_dir = "exporter"
+
+    console.log(f"[bold]Building {exporter_name} image")
+    if image_exists(f"{exporter_name}"):
+        console.log(f"[yellow]Skipped as the {exporter_name} image is already present")
+    else:
+        build_image(f"{exporter_name}", exporter_dir, verbose=verbose)
+        console.log(f"[green]The {exporter_name} image was built successfully")
 
     # Run the container
-    console.log("[bold]Deploying uyuni-health-exporter container")
-    if container_is_running("uyuni-health-exporter", server=server):
+    console.log(f"[bold]Deploying {exporter_name} container")
+    if container_is_running(f"{exporter_name}", server=server):
         console.log(
-            "[yellow]Skipped as the uyuni-health-exporter container is already running"
+            f"[yellow]Skipped as the {exporter_name} container is already running"
         )
         return
 
     # Transfering the image
     if server:
-        transfer_image(server, "uyuni-health-exporter")
+        transfer_image(server, f"{exporter_name}")
 
-    # Get the Salt UID/GID
-    id_process = ssh_call(server, ["id", "salt"])
-    if id_process.returncode != 0:
-        err = id_process.stderr.read()
-        if "no such user" in err:
-            raise HealthException(
-                "Salt is not installed... is the tool running on an Uyuni server?"
-            )
-        else:
-            raise HealthException(f"Failed to get Salt GID on server: {err}")
-    id_out = id_process.stdout.read()
-    salt_uid = re.match(".*uid=([0-9]+)", id_out).group(1)
-    salt_gid = re.match(".*gid=([0-9]+)", id_out).group(1)
+    if not supportconfig_path:
+        # Get the Salt UID/GID
+        id_process = ssh_call(server, ["id", "salt"])
+        if id_process.returncode != 0:
+            err = id_process.stderr.read()
+            if "no such user" in err:
+                raise HealthException(
+                    "Salt is not installed... is the tool running on an Uyuni server?"
+                )
+            else:
+                raise HealthException(f"Failed to get Salt GID on server: {err}")
+        id_out = id_process.stdout.read()
+        salt_uid = re.match(".*uid=([0-9]+)", id_out).group(1)
+        salt_gid = re.match(".*gid=([0-9]+)", id_out).group(1)
+
+    # Prepare arguments for Podman call
+    podman_args = [
+        "run",
+        "--pod",
+        "uyuni-health-check",
+        "-d",
+        "--network=host",
+    ]
+
+    if supportconfig_path:
+        podman_args.extend(
+            [
+                "-v",
+                f"{supportconfig_path}:{supportconfig_path}",
+            ]
+        )
+    else:
+        podman_args.extend(
+            [
+                "-u",
+                f"{salt_uid}:{salt_gid}",
+                "-v",
+                "/etc/salt:/etc/salt:ro",
+                "-v",
+                "/var/cache/salt/:/var/cache/salt",
+            ]
+        )
+
+    podman_args.extend(
+        [
+            "--name",
+            f"{exporter_name}",
+            f"{exporter_name}",
+        ]
+    )
 
     # Run the container
     podman(
-        [
-            "run",
-            "--pod",
-            "uyuni-health-check",
-            "-u",
-            f"{salt_uid}:{salt_gid}",
-            "-d",
-            "--network=host",
-            "-v",
-            "/etc/salt:/etc/salt:ro",
-            "-v",
-            "/var/cache/salt/:/var/cache/salt",
-            "--name",
-            "uyuni-health-exporter",
-            "uyuni-health-exporter",
-        ],
+        podman_args,
         server,
         console=console,
     )
@@ -513,7 +645,7 @@ def create_pod(server):
         )
 
 
-def run_loki(server):
+def run_loki(server, supportconfig_path=None, verbose=False):
     """
     Run promtail and loki to aggregate the logs
 
@@ -522,8 +654,24 @@ def run_loki(server):
     if container_is_running("loki", server=server):
         console.log("[yellow]Skipped as the loki container is already running")
     else:
+        loki_cfg = os.path.join(os.path.dirname(__file__), "loki/config.yaml")
+        promtail_cfg = render_promtail_cfg(supportconfig_path)
 
-        # TODO Prepare config to tune the oldest message allowed
+        # Copy the promtail and loki config files if necessary
+        if server:
+            try:
+                subprocess.run(
+                    ["scp", "-q", promtail_cfg, f"{server}:/tmp/"], check=True
+                )
+                promtail_cfg = "/tmp/promtail.yaml"
+                subprocess.run(["scp", "-q", loki_cfg, f"{server}:/tmp/"], check=True)
+                promtail_cfg = "/tmp/loki.yaml"
+            except Exception:
+                raise HealthException(
+                    f"Failed to copy promtail configuration to {server}"
+                )
+
+        # Run loki container
         podman(
             [
                 "run",
@@ -533,32 +681,20 @@ def run_loki(server):
                 "-d",
                 "--name",
                 "loki",
+                "-v",
+                f"{loki_cfg}:/etc/loki/local-config.yaml",
                 "docker.io/grafana/loki",
             ],
             server,
             console=console,
         )
 
-        # Copy the promtail config
-        promtail_cfg = os.path.join(
-            os.path.dirname(__file__), "promtail", "promtail.yaml"
-        )
-        if server:
-            try:
-                subprocess.run(
-                    ["scp", "-q", promtail_cfg, f"{server}:/tmp/"], check=True
-                )
-                promtail_cfg = "/tmp/promtail.yaml"
-            except Exception:
-                raise HealthException(
-                    f"Failed to copy promtail configuration to {server}"
-                )
-
         # Run promtail only now since it pushes data to loki
         console.log("[bold]Building promtail image")
-        build_loki_image("promtail")
+        build_loki_image("promtail", verbose=verbose)
         if server:
             transfer_image(server, "promtail")
+
         podman(
             [
                 "run",
@@ -568,6 +704,8 @@ def run_loki(server):
                 f"{promtail_cfg}:/etc/promtail/config.yml",
                 "-v",
                 "/var/log/:/var/log/",
+                "-v",
+                f"{supportconfig_path}:{supportconfig_path}",
                 "--name",
                 "promtail",
                 "--pod",
@@ -602,6 +740,24 @@ def clean_server(server):
             )
             console.log("[green]Containers have been removed")
 
+        console.log("[bold]Removing promtail and exporter images")
+        images_to_remove = [
+            "localhost/promtail",
+            "localhost/supportconfig-exporter",
+            "localhost/uyuni-health-exporter",
+        ]
+        for image in images_to_remove:
+            if image_exists(image, server=server):
+                podman(
+                    [
+                        "rmi",
+                        image,
+                    ],
+                    server,
+                    console=console,
+                )
+                console.log(f"[green]{image} image has been removed")
+
 
 @click.group()
 @click.option(
@@ -611,22 +767,37 @@ def clean_server(server):
     help="Uyuni Server to connect to if not running directly on the server",
 )
 @click.option(
+    "-i",
+    "--supportconfig_path",
+    default=None,
+    help="Use a supportconfig path as the data source",
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
     help="Show more stdout, including image building",
 )
 @click.pass_context
-def cli(ctx, server, verbose):
+def cli(ctx, server, supportconfig_path, verbose):
     # ensure that ctx.obj exists and is a dict (in case `cli()` is called
     # by means other than the `if` block below)
     ctx.ensure_object(dict)
     ctx.obj["server"] = server
-    ctx.obj["verbose"] = server
+    ctx.obj["verbose"] = verbose
+    ctx.obj["supportconfig_path"] = supportconfig_path
+
+    if server and supportconfig_path:
+        console.log(
+            "[red bold] Cannot pass both 'server' and 'supportconfig_path' at the same time!"
+        )
+        console.print(Markdown("# Execution Finished"))
+        exit(1)
 
     try:
         console.log("[bold]Checking connection with podman:")
         ssh_call(server, ["podman", "--version"], console=console, quiet=False)
+        ssh_call(server, ["podman", "images"], console=console, quiet=True)
     except HealthException as err:
         console.log("[red bold]" + str(err))
         console.print(Markdown("# Execution Finished"))
@@ -719,13 +890,19 @@ def start(ctx):
     help="Show the error logs",
 )
 @click.option(
+    "--since",
+    default=7,
+    type=int,
+    help="Show logs from last X days. (Default: 7)",
+)
+@click.option(
     "-c",
     "--clean",
     is_flag=True,
     help="Remove containers after execution",
 )
 @click.pass_context
-def run(ctx, exporter_port, loki, logs, clean):
+def run(ctx, exporter_port, loki, logs, since, clean):
     """
     Start execution of Uyuni Health Check
 
@@ -737,22 +914,26 @@ def run(ctx, exporter_port, loki, logs, clean):
     """
     server = ctx.obj["server"]
     verbose = ctx.obj["verbose"]
+    supportconfig_path = ctx.obj["supportconfig_path"]
+
     try:
         with console.status(status=None):
             console.log("[bold]Creating POD for containers")
             create_pod(server)
 
             console.log("[bold]Building logcli image")
-            build_loki_image("logcli", server=server)
+            build_loki_image("logcli", server=server, verbose=verbose)
 
             console.log("[bold]Deploying promtail and Loki")
             if not loki:
-                run_loki(server)
+                run_loki(server, supportconfig_path=supportconfig_path, verbose=verbose)
             else:
                 console.log(f"[yellow]Skipped to use Loki at {loki}")
 
-            console.log("[bold]Preparing uyuni-health-exporter")
-            prepare_exporter(server, verbose=verbose)
+            console.log("[bold]Preparing prometheus exporter")
+            prepare_exporter(
+                server, supportconfig_path=supportconfig_path, verbose=verbose
+            )
 
             console.log("[bold]Preparing grafana")
             prepare_grafana(server, verbose=verbose)
@@ -760,64 +941,139 @@ def run(ctx, exporter_port, loki, logs, clean):
             console.log("[bold]Preparing prometheus")
             prepare_prometheus(server, verbose=verbose)
 
-            # Fetch metrics from uyuni-health-exporter
-            console.log("[bold]Fetching metrics from uyuni-health-exporter")
-            metrics = fetch_metrics_exporter(server, exporter_port)
+            if not supportconfig_path:
+                # Fetch metrics from uyuni-health-exporter
+                console.log("[bold]Fetching metrics from uyuni-health-exporter")
+                metrics = fetch_metrics_from_uyuni_health_exporter(
+                    server, exporter_port
+                )
 
-            # Check spacewalk services
-            console.log("[bold]Checking spacewalk services")
-            check_spacewalk_services(server, verbose=verbose)
+                # Check spacewalk services
+                console.log("[bold]Checking spacewalk services")
+                check_spacewalk_services(server, verbose=verbose)
 
-            # Check spacewalk services
-            console.log("[bold]Checking postgresql service")
-            check_postgres_service(server)
+                # Check spacewalk services
+                console.log("[bold]Checking postgresql service")
+                check_postgres_service(server)
+            else:
+                # Fetch metrics from supportconfig-exporter
+                console.log("[bold]Fetching metrics from supportconfig-exporter")
+                metrics = fetch_metrics_from_supportconfig_exporter(
+                    server, exporter_port
+                )
 
-            console.log("[bold]Waiting for loki to be ready")
+            console.log(
+                "[bold]Waiting for Loki and promtail to be ready. This may take some time..."
+            )
             host = server or "localhost"
-            wait_loki_init(host)
+            wait_loki_init(host, verbose=verbose)
 
         # Gather and show the data
         console.print(Markdown("# Results"))
-        show_data(metrics)
+        if supportconfig_path:
+            show_supportconfig_metrics(metrics)
+        else:
+            show_uyuni_live_server_metrics(metrics)
 
+        show_relevant_hints()
         console.print(Markdown("## Relevant Errors"))
         loki_url = loki if loki else f"http://{host}:3100"
-        show_error_logs_stats(loki_url)
+        show_error_logs_stats(loki_url, since)
         if logs:
-            show_full_error_logs(loki_url)
+            show_full_error_logs(loki_url, since)
+
     except HealthException as err:
         console.log("[red bold]" + str(err))
     finally:
         if clean:
             clean_server(server)
+
+    if not clean:
+        grafana_host = server or "localhost"
+        console.print(
+            Panel(
+                Text(
+                    f"You can visit now the live dashboards to see metrics and relevant errors at http://{grafana_host}:3000/dashboards",
+                    justify="center",
+                )
+            ),
+            style="italic green",
+        )
     console.print(Markdown("# Execution Finished"))
 
 
-def fetch_metrics_exporter(host="localhost", port=9000, max_retries=5):
-    if not host:
-        host = "localhost"
-
+def _fetch_metrics_from_exporter(host="localhost", port=9000, max_retries=5):
     for i in range(max_retries):
         try:
             metrics_raw = requests.get(f"http://{host}:{port}").content.decode()
-            salt_metrics = re.findall(
-                r'salt_jobs{fun="(.+)",name="(.+)"} (.+)', metrics_raw
-            )
-            uyuni_metrics = re.findall(r'uyuni_summary{name="(.+)"} (.+)', metrics_raw)
-            salt_master_metrics = re.findall(
-                r'salt_master_stats{name="(.+)"} (.+)', metrics_raw
-            )
-            break
+            return metrics_raw
         except requests.exceptions.RequestException as exc:
             if i < max_retries - 1:
                 time.sleep(1)
                 console.log("[italic]retrying...")
             else:
                 console.log(
-                    "[italic red]There was an error while fetching metrics from uyuni-health-exporter[/italic red]"
+                    "[italic red]There was an error while fetching metrics from exporter[/italic red]"
                 )
                 print(f"{exc}")
                 exit(1)
+
+
+def fetch_metrics_from_supportconfig_exporter(
+    host="localhost", port=9000, max_retries=5
+):
+    if not host:
+        host = "localhost"
+
+    metrics_raw = _fetch_metrics_from_exporter(host, port, max_retries)
+
+    salt_jobs = re.findall(r'salt_jobs{fun="(.+)",jid="(.+)"} (.+)', metrics_raw)
+    salt_keys = re.findall(r'salt_keys{name="(.+)"} (.+)', metrics_raw)
+    salt_master_config = re.findall(
+        r'salt_master_config{name="(.+)"} (.+)', metrics_raw
+    )
+
+    if not salt_jobs or not salt_keys or not salt_master_config:
+        console.log(
+            "[yellow]Some metrics are still missing. Wait some seconds and execute again"
+        )
+        return {}
+
+    metrics = {
+        "salt_jobs": {},
+        "salt_keys": {},
+        "salt_master_config": {},
+    }
+
+    for m in salt_jobs:
+        if m[0] in metrics["salt_jobs"]:
+            metrics["salt_jobs"][m[0]] += 1
+        else:
+            metrics["salt_jobs"][m[0]] = 1
+
+    for m in salt_master_config:
+        metrics["salt_master_config"][m[0]] = float(m[1])
+
+    for m in salt_keys:
+        metrics["salt_keys"][m[0]] = float(m[1])
+
+    console.log("[green]metrics have been successfully collected")
+    return metrics
+
+
+def fetch_metrics_from_uyuni_health_exporter(
+    host="localhost", port=9000, max_retries=5
+):
+    if not host:
+        host = "localhost"
+
+    metrics_raw = _fetch_metrics_from_exporter(host, port, max_retries)
+
+    salt_metrics = re.findall(r'salt_jobs{fun="(.+)",name="(.+)"} (.+)', metrics_raw)
+    uyuni_metrics = re.findall(r'uyuni_summary{name="(.+)"} (.+)', metrics_raw)
+    salt_master_metrics = re.findall(
+        r'salt_master_stats{name="(.+)"} (.+)', metrics_raw
+    )
 
     if not salt_metrics or not uyuni_metrics or not salt_master_metrics:
         console.log(
