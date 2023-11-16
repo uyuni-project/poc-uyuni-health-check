@@ -71,7 +71,7 @@ class SupportConfigMetricsCollector(object):
         ]
         ret = {}
         for attr in attrs_to_expose:
-            ret[attr] = re.findall(f"^{attr}: ([0-9]+)$", content, re.MULTILINE)[0]
+            ret[attr] = re.findall(f"^{attr}: ([0-9]+)$", content, re.MULTILINE)[-1]
         return ret
 
     def read_salt_keys(self):
