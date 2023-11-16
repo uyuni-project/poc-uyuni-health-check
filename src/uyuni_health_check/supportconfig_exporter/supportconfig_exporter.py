@@ -63,7 +63,6 @@ class SupportConfigMetricsCollector(object):
             os.path.join(self.supportconfig_path, "plugin-saltconfiguration.txt")
         ) as f:
             content = f.read()
-        #        parsed = re.findall("^Content of the config: (.*)$((?:\n.+)+)$", content, re.MULTILINE)
         attrs_to_expose = [
             "worker_threads",
             "sock_pool_size",
