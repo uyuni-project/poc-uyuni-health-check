@@ -37,14 +37,16 @@ limits_config:
   enforce_metric_name: false
   reject_old_samples: false
   reject_old_samples_max_age: 8064h #336d
-  ingestion_rate_mb: 10
-  ingestion_burst_size_mb: 20
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
   # parallelize queries in 15min intervals
   # split_queries_by_interval: 15m
   split_queries_by_interval: 1h
   unordered_writes: true
   # Default: 721h
   max_query_length: 5000h
+  per_stream_rate_limit: 50MB
+  per_stream_rate_limit_burst: 100MB
 
 chunk_store_config:
   max_look_back_period: 8064h #336d
