@@ -83,6 +83,11 @@ To clean and remove all containers:
 
     uyuni-health-check clean
 
+## Security notes
+After running this tool, and until containers are destroyed, the Grafana Dashboards (and other metrics) are exposing metrics and logs messages that may contain sensitive data and information to any non-root user in the system or to anyone that have access to this host in the network.
+
+Please, be careful when running this tool.
+
 ## TODO
 
 * Cleaner and more compact final view of the data
@@ -94,10 +99,10 @@ To clean and remove all containers:
   * Remove the timestamp for the log lines for cleaner output
   * Parse and unify the log levels in promtail
     The issue here is that `Critical` is showing in some log messages as parts of class names and probably we are missing some log entries due to slightly different wordings.
-* Allow running based on an archive of extracted logs (supportconfig?)
 
 ## Changelog
 
+* Add support to run the tool based on a "supportconfig" instead of running server.
 * Deploy Loki, prometheus and grafana containers and dashboard.
 * Enhance `uyuni-health-check` CLI - new commands added.
 * Fix problems building Python package.

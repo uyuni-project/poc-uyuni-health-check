@@ -11,6 +11,7 @@ dependencies = [
     "Click",
     "rich",
     "requests",
+    "Jinja2",
 ]
 maintainers = [
     {name = "Pablo Suárez Hernández", email = "psuarezhernandez@suse.com"},

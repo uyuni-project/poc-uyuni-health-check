@@ -15,23 +15,45 @@ scrape_configs:
       - localhost
     labels:
       job: cobbler
-      __path__: /var/log/cobbler/cobbler.log
+      __path__: {{ cobbler_logs_file }}
   pipeline_stages:
   - multiline:
-      firstline: '^(?P<time>[\dT:-]+) - [A-Z]+ | '
+      firstline: '^\[.*\] [\dT:-]+ - [A-Z]+ | '
   - regex:
-      expression: '^(?P<time>[\dT:-]+) '
+      expression: '^\[.*\] (?P<time>[\dT:-]+) '
   - timestamp:
       source: time
       format: '2006-01-02T15:04:05'
-      location: CET
+- job_name: postgresql
+  decompression:
+    enabled: true
+    initial_delay: 2s
+    format: gz
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: postgresql
+      __path__: {{ postgresql_logs_path }}/postgresql*.log*
+  pipeline_stages:
+    - multiline:
+        firstline: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3} \S+ '
+        max_wait_time: 3s
+        # default is 128, we might need more depending on the size of the query
+        max_lines: 256
+    - regex:
+        # yamllint disable-line rule:line-length
+        expression: '^(?P<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}) '
+    - timestamp:
+        source: time
+        format: '2006-01-02 15:04:05.000'
 - job_name: salt
   static_configs:
   - targets:
       - localhost
     labels:
       job: salt
-      __path__: /var/log/salt/{api,master}
+      __path__: {{ salt_logs_path }}{api,master}
   pipeline_stages:
   - multiline:
       firstline: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(,)\d{3} '
@@ -43,7 +65,6 @@ scrape_configs:
   - timestamp:
       source: time
       format: '2006-01-02 15:04:05.000'
-      location: CET
 - job_name: rhn
   pipeline_stages:
   - drop:
@@ -62,27 +83,26 @@ scrape_configs:
   - timestamp:
       source: time
       format: '2006-01-02 15:04:05.000'
-      location: CET
   static_configs:
   - targets:
       - localhost
     labels:
       job: rhn
       component: tomcat
-      __path__: /var/log/rhn/rhn_{salt,web}_*log
+      __path__: {{ rhn_logs_path }}rhn_{salt,web}_*log
   - targets:
       - localhost
     labels:
       job: rhn
       component: taskomatic
-      __path__: /var/log/rhn/rhn_taskomatic_*log
+      __path__: {{ rhn_logs_path }}rhn_taskomatic_*log
 - job_name: apache
   static_configs:
   - targets:
       - localhost
     labels:
       job: apache
-      __path__: /var/log/apache2/*_log
+      __path__: {{ apache2_logs_path }}*_log
   pipeline_stages:
   - match:
       selector: '{job="apache"} |~ "^\\[[A-Z][a-z]{2} "'
@@ -94,7 +114,6 @@ scrape_configs:
       - timestamp:
           source: time
           format: 'Mon Jan 02 15:04:05.000000 2006'
-          location: CET
   - match:
       selector: '{job="apache"} |~ "^\\[\\d{2}/[A-Z][a-z]{2}/"'
       stages:
@@ -103,7 +122,6 @@ scrape_configs:
       - timestamp:
           source: time
           format: '02/Jan/2006:15:04:05 -0700'
-          location: CET
       - labels:
           ip:
   - match:
@@ -114,6 +132,5 @@ scrape_configs:
       - timestamp:
           source: time
           format: '02/Jan/2006:15:04:05 -0700'
-          location: CET
       - labels:
           ip:

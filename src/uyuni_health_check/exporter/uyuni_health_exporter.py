@@ -229,6 +229,7 @@ class UyuniMetricsCollector(object):
 
 
 def main():
+    print("Uyuni Health Exporter started")
     port = 9000
     frequency = 60
     if os.path.exists("config.yml"):
@@ -243,6 +244,7 @@ def main():
     start_http_server(port)
     uyuni_data_gatherer = UyuniDataGatherer()
     REGISTRY.register(UyuniMetricsCollector(uyuni_data_gatherer))
+    print("Uyuni Health Exporter is ready")
     while True:
         # period between collection
         time.sleep(frequency)

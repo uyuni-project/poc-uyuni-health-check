@@ -8,7 +8,8 @@ datasources:
   basicAuth: false
   isDefault: true
   version: 1
-  editable: false
+  timeout: '120'
+  editable: true
 
 - name: Prometheus 
   type: prometheus
