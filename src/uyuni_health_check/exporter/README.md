@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2023 SUSE LLC
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Requirements
 
 The "uyuni-health-exporter" runs within a container in the Uyuni server. You would need to install the following packages:

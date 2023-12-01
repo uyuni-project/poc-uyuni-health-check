@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2023 SUSE LLC
+#
+# SPDX-License-Identifier: Apache-2.0
+
 import json
 import re
 import time

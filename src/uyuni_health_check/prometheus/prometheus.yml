@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2023 SUSE LLC
+#
+# SPDX-License-Identifier: Apache-2.0
+
 global:
   scrape_interval:     60s
   evaluation_interval: 60s

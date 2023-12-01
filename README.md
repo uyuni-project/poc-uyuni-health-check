@@ -1,3 +1,11 @@
+<!--
+SPDX-FileCopyrightText: 2023 SUSE LLC
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+[![REUSE status](https://api.reuse.software/badge/git.fsfe.org/reuse/api)](https://api.reuse.software/info/git.fsfe.org/reuse/api)
+
 # uyuni-health-check <img src="https://img.shields.io/badge/EXPERIMENTAL-WIP-red" />
 
 A tool providing dashboard, metrics and logs from an Uyuni server to show its health status.
