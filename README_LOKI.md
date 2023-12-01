@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2023 SUSE LLC
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Installing loki
 
 In this doc the `loki` server will be installed on the same machine than the grafana and prometheus services, but this is not mandatory.

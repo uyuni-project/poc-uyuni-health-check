@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2023 SUSE LLC
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 ---
 name: New Data Request template
 about: Request more data in the tool output
