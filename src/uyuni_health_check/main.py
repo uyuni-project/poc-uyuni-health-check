@@ -515,23 +515,35 @@ def run_loki(server, supportconfig_path=None, verbose=False):
         if server:
             transfer_image(server, "promtail")
 
-        podman(
+        podman_args = [
+            "run",
+            "--replace",
+            "-d",
+            "-v",
+            f"{promtail_cfg}:/etc/promtail/config.yml",
+            "-v",
+            "/var/log/:/var/log/",
+        ]
+
+        if supportconfig_path:
+            podman_args.extend(
+                [
+                    "-v",
+                    f"{supportconfig_path}:{supportconfig_path}",
+                ]
+            )
+
+        podman_args.extend(
             [
-                "run",
-                "--replace",
-                "-d",
-                "-v",
-                f"{promtail_cfg}:/etc/promtail/config.yml",
-                "-v",
-                "/var/log/:/var/log/",
-                "-v",
-                f"{supportconfig_path}:{supportconfig_path}",
                 "--name",
                 "promtail",
                 "--pod",
                 "uyuni-health-check",
                 "promtail",
-            ],
+            ]
+        )
+        podman(
+            podman_args,
             server,
             console=console,
         )
