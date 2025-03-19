@@ -4,6 +4,12 @@ SPDX-FileCopyrightText: 2023 SUSE LLC
 SPDX-License-Identifier: Apache-2.0
 -->
 
+# Project deprecated and archived
+
+We now develop uyuni-health-check at the [main Uyuni repository](https://github.com/uyuni-project/uyuni/)
+
+# REUSE status
+
 [![REUSE status](https://api.reuse.software/badge/git.fsfe.org/reuse/api)](https://api.reuse.software/info/git.fsfe.org/reuse/api)
 
 # uyuni-health-check <img src="https://img.shields.io/badge/EXPERIMENTAL-WIP-red" />
